@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: service-quality-oracle-data
+  labels:
+    app: service-quality-oracle
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: "ssd-retain"  # Production storage class with retention
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: service-quality-oracle-logs
+  labels:
+    app: service-quality-oracle
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: "ssd-retain"  # Production storage class with retention

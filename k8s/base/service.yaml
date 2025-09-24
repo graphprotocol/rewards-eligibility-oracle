@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-quality-oracle
+  labels:
+    app: service-quality-oracle
+spec:
+  selector:
+    app: service-quality-oracle
+  ports:
+    - name: metrics
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP

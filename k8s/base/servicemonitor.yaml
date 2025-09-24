@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: service-quality-oracle
+  labels:
+    app: service-quality-oracle
+spec:
+  selector:
+    matchLabels:
+      app: service-quality-oracle
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s

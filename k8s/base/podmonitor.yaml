@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: service-quality-oracle
+  labels:
+    app: service-quality-oracle
+spec:
+  selector:
+    matchLabels:
+      app: service-quality-oracle
+  podMetricsEndpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s

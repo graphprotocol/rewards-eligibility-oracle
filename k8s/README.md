@@ -1,72 +1,175 @@
 # Service Quality Oracle - Kubernetes Deployment
 
-This directory contains Kubernetes manifests for deploying the Service Quality Oracle with persistent state management.
+This directory contains Kubernetes manifests for deploying the Service Quality Oracle in different environments using Kustomize with persistent state management.
+
+## Structure
+
+```
+k8s/
+├── README.md                    # This file
+├── auth.sh                     # Global auth script (configure for your cluster)
+├── base/                       # Common base resources
+│   ├── kustomization.yaml
+│   ├── namespace.yaml
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── servicemonitor.yaml
+│   ├── serviceaccount.yaml
+│   └── podmonitor.yaml
+└── environments/
+    ├── mainnet/                # Production environment
+    │   ├── kustomization.yaml
+    │   ├── config.yaml         # Mainnet configuration
+    │   ├── config.secret.yaml  # Mainnet secrets (configure before use)
+    │   ├── persistent-volume-claim.yaml
+    │   ├── auth.sh
+    │   ├── apply.sh
+    │   ├── diff.sh
+    │   └── restart-deployments.sh
+    └── testnet/                # Staging environment
+        ├── kustomization.yaml
+        ├── config.yaml         # Testnet configuration
+        ├── config.secret.yaml  # Testnet secrets (configure before use)
+        ├── persistent-volume-claim.yaml
+        ├── auth.sh
+        ├── apply.sh
+        ├── diff.sh
+        └── restart-deployments.sh
+```
 
 ## Prerequisites
 
 - Kubernetes cluster (version 1.19+)
 - `kubectl` configured to access your cluster
+- Kustomize (built into kubectl v1.14+)
 - Docker image published to `ghcr.io/graphprotocol/service-quality-oracle`
 - **Storage class configured** (see Storage Configuration below)
 
 ## Quick Start
 
-### 1. Create Secrets (Required)
+### 1. Configure Cluster Access
+
+Update `auth.sh` with your GKE cluster details:
 
 ```bash
-# Copy the example secrets file
-cp k8s/secrets.yaml.example k8s/secrets.yaml
+# Edit auth.sh
+vim auth.sh
 
-# Edit with your actual credentials
-# IMPORTANT: Never commit secrets.yaml to version control
-nano k8s/secrets.yaml
+# Connect to your cluster
+./auth.sh
 ```
 
-**Required secrets:**
-- **`google-credentials`**: Service account JSON for BigQuery access
-- **`blockchain-private-key`**: Private key for Arbitrum Sepolia transactions  
-- **`arbitrum-api-key`**: API key for Arbiscan contract verification
-- **`slack-webhook-url`**: Webhook URL for operational notifications
+### 2. Deploy to Testnet
 
-### 2. Configure Storage (Required)
+```bash
+cd environments/testnet
+
+# Configure secrets (replace placeholder values)
+vim config.secret.yaml
+
+# Preview changes
+./diff.sh
+
+# Deploy
+./apply.sh
+
+# Monitor
+kubectl logs -f deployment/service-quality-oracle -n service-quality-oracle
+```
+
+### 3. Deploy to Mainnet
+
+```bash
+cd environments/mainnet
+
+# Configure secrets (replace placeholder values with production keys)
+vim config.secret.yaml
+
+# Configure mainnet contract address
+vim config.yaml
+# Update BLOCKCHAIN_CONTRACT_ADDRESS with actual mainnet contract
+
+# Preview changes
+./diff.sh
+
+# Deploy (includes safety checks)
+./apply.sh
+
+# Monitor
+kubectl logs -f deployment/service-quality-oracle -n service-quality-oracle
+```
+
+## Environment Configuration
+
+### Environment Differences
+
+| Setting | Testnet | Mainnet |
+|---------|---------|---------|
+| Chain | Arbitrum Sepolia | Arbitrum One |
+| Contract | 0x6d5...91f6 | Configure in config.yaml |
+| Image Tag | testnet-latest | mainnet-latest |
+| Labels | environment: testnet, variant: staging | environment: mainnet, variant: production |
+
+### Secret Configuration
+
+Before deploying, you must configure the following secrets in each environment's `config.secret.yaml`:
+
+- **`google-credentials`**: Service account JSON for BigQuery access
+- **`blockchain-private-key`**: Private key for blockchain transactions (64 chars, no 0x)
+- **`etherscan-api-key`**: Etherscan API key
+- **`arbitrum-api-key`**: API key for Arbiscan contract verification
+- **`studio-api-key`**: The Graph Studio API key
+- **`studio-deploy-key`**: The Graph Studio deploy key
+- **`slack-webhook-url`**: Slack webhook for notifications
+
+## Storage Configuration
 
 ```bash
 # Check available storage classes
 kubectl get storageclass
 
-# If you see a default storage class (marked with *), skip to step 3
-# Otherwise, edit persistent-volume-claim.yaml and uncomment the appropriate storageClassName
+# The manifests use 'ssd-retain' storage class by default
+# Edit environments/{mainnet,testnet}/persistent-volume-claim.yaml if needed
 ```
 
 **Common storage classes by platform:**
 - **AWS EKS**: `gp2`, `gp3`, `ebs-csi`
-- **Google GKE**: `standard`, `ssd`  
+- **Google GKE**: `standard`, `ssd`
 - **Azure AKS**: `managed-premium`, `managed`
 - **Local/Development**: `hostpath`, `local-path`
 
-### 3. Deploy to Kubernetes
+## Operations
+
+### Restart Deployments
 
 ```bash
-# Apply all manifests
-kubectl apply -f k8s/
-
-# Verify deployment
-kubectl get pods -l app=service-quality-oracle
-kubectl get pvc -l app=service-quality-oracle
+./restart-deployments.sh
 ```
 
-### 4. Monitor Deployment
+### View Logs
 
 ```bash
-# Check pod status
-kubectl describe pod -l app=service-quality-oracle
-
-# View logs
-kubectl logs -l app=service-quality-oracle -f
-
-# Check persistent volumes
-kubectl get pv
+kubectl logs -f deployment/service-quality-oracle -n service-quality-oracle
 ```
+
+### Check Status
+
+```bash
+kubectl get all -n service-quality-oracle
+```
+
+### Delete Environment
+
+```bash
+kubectl delete -k .
+```
+
+## Monitoring
+
+- Prometheus scraping enabled via annotations
+- ServiceMonitor and PodMonitor configured for metrics collection
+- Metrics exposed on port 8000 at `/metrics` endpoint
+- Labels applied for environment-specific alerting
 
 ## Architecture
 
@@ -74,8 +177,8 @@ kubectl get pv
 
 The service uses **two persistent volumes** to maintain state across pod restarts:
 
-- **`service-quality-oracle-data` (5GB)**: Circuit breaker state, last run tracking, BigQuery cache, CSV outputs
-- **`service-quality-oracle-logs` (2GB)**: Application logs
+- **`service-quality-oracle-data` (10GB)**: Circuit breaker state, last run tracking, BigQuery cache, CSV outputs
+- **`service-quality-oracle-logs` (5GB)**: Application logs
 
 **Mount points:**
 - `/app/data` → Critical state files (circuit breaker, cache, outputs)
@@ -83,8 +186,8 @@ The service uses **two persistent volumes** to maintain state across pod restart
 
 ### Configuration Management
 
-**Non-sensitive configuration** → `ConfigMap` (`configmap.yaml`)
-**Sensitive credentials** → `Secret` (`secrets.yaml`)
+**Non-sensitive configuration** → `ConfigMap` (generated from `config.yaml`)
+**Sensitive credentials** → `Secret` (generated from `config.secret.yaml`)
 
 This separation provides:
 - ✅ Easy configuration updates without rebuilding images
@@ -98,7 +201,7 @@ This separation provides:
 - Memory: 512M
 
 **Limits (maximum):**
-- CPU: 1000m (1.0 core)  
+- CPU: 1000m (1.0 core)
 - Memory: 1G
 
 ## State Persistence Benefits
@@ -127,7 +230,7 @@ kubectl describe pod -l app=service-quality-oracle
 
 # Common issues:
 # - Missing secrets
-# - PVC provisioning failures
+# - PVC provisioning failures  
 # - Image pull errors
 ```
 
@@ -151,13 +254,16 @@ kubectl exec -it deployment/service-quality-oracle -- env | grep -E "(BIGQUERY|B
 kubectl exec -it deployment/service-quality-oracle -- ls -la /etc/secrets
 ```
 
-## Security Best Practices
+## Security
 
-✅ **Secrets never committed** to version control  
+✅ **Never commit actual secrets** - `config.secret.yaml` files contain placeholders only  
+✅ **Mainnet deployment safety checks** for production secrets  
+✅ **Non-root containers** with dropped capabilities  
 ✅ **Service account** with minimal BigQuery permissions  
 ✅ **Private key** stored in Kubernetes secrets (base64 encoded)  
 ✅ **Resource limits** prevent resource exhaustion  
-✅ **Read-only filesystem** where possible  
+✅ **Workload Identity** configured for secure GCP access  
+✅ **SSD storage with retention** for data persistence
 
 ## Production Considerations
 
@@ -171,7 +277,7 @@ kubectl exec -it deployment/service-quality-oracle -- ls -la /etc/secrets
 ## Next Steps
 
 1. **Test deployment** in staging environment
-2. **Verify state persistence** across pod restarts  
+2. **Verify state persistence** across pod restarts
 3. **Set up monitoring** and alerting
 4. **Configure backup** for persistent volumes
 5. **Enable quality checking** after successful validation

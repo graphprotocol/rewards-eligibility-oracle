@@ -22,7 +22,7 @@ This document defines the requirements an Indexer must meet to be eligible for i
 The following criteria are used to identify indexers that should be eligible to receive indexing rewards.
 
 - **Days Online Requirement:** Indexers must be active for **5+ days** in a given **28 day** period for rewards eligibility.
-- **Daily Query Requirement:** To be active, an indexer must serve at least **1 qualifying query** on **10 different subgraphs**.
+- **Daily Query Requirement:** To be active, an indexer must serve at least **1 qualifying query**.
 - **Query Quality Requirements:** A qualifying query is one that simultaneously meets **all** of the following criteria:
   - Query Response HTTP Status: **200 OK**.
   - Query Response Latency: **< 5,000 ms**.
@@ -42,7 +42,7 @@ This table tracks changes to the indexing rewards eligibility requirements over 
 | Requirement Category | Requirement Details | Effective Date (YYYY-MM-DD) | Change Type: Initial, Updated, New, Removed | Justification | Notes |
 |----------------------|---------------------|-----------------------------|-------------|---------------|-------|
 | **Indexer Activity** | Indexers must be active for **5+ days** in a given **28 day** period for indexing rewards eligibility. | TBD | Initial | Encourages indexers to familiarize themselves with infrastructure maintenance and ongoing operations. | Planned for Rewards Eligibility Oracle launch |
-| **Query Qualification** | Indexers must serve **≥1 qualifying query** on **≥10 different subgraphs** in a day for the day to count towards the **Indexer Activity** requirement. | TBD | Initial | Encourages indexers to become familiar with the process of syncing a range of subgraphs. | Planned for Rewards Eligibility Oracle launch |
+| **Query Qualification** | Indexers must serve **≥1 qualifying query** in a day for the day to count towards the **Indexer Activity** requirement. | TBD | Initial | Encourages indexers to become familiar with the process of syncing and serving subgraph data. | Planned for Rewards Eligibility Oracle launch |
 | **Query Response Quality** | *•* Query Response HTTP Status: **200 OK**<br>*•* Query Response Latency: **< 5,000 ms**<br>*•* Query Freshness: **< 50,000 blocks** behind chainhead. | TBD | Initial | *•* Indexer infrastructure needs to serve successful queries to benefit data consumers.<br>*•* Fast query responses are important to data consumers.<br>*•* Encourages indexers to sync to chainhead. | Planned for Rewards Eligibility Oracle launch |
 
 ---

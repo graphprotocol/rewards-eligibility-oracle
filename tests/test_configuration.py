@@ -84,7 +84,7 @@ def full_valid_config() -> dict:
         "BIGQUERY_DATASET_ID": "test-dataset",
         "BIGQUERY_TABLE_ID": "test-table",
         "MIN_ONLINE_DAYS": 5,
-        "MIN_SUBGRAPHS": 10,
+        "MIN_SUBGRAPHS": 1,
         "MAX_LATENCY_MS": 5000,
         "MAX_BLOCKS_BEHIND": 100,
         "BLOCKCHAIN_CONTRACT_ADDRESS": "0x1234",

@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: service-quality-oracle
+  name: rewards-eligibility-oracle
   labels:
-    app: service-quality-oracle
+    app: rewards-eligibility-oracle
 spec:
   selector:
-    app: service-quality-oracle
+    app: rewards-eligibility-oracle
   ports:
     - name: metrics
       port: 8000

@@ -2,8 +2,8 @@
 
 set -e
 
-# Apply Kubernetes manifests for service-quality-oracle (mainnet)
-echo "Applying service-quality-oracle mainnet manifests..."
+# Apply Kubernetes manifests for rewards-eligibility-oracle (mainnet)
+echo "Applying rewards-eligibility-oracle mainnet manifests..."
 
 # Ensure we're authenticated to the correct cluster
 echo "Authenticating to cluster..."
@@ -28,5 +28,5 @@ kubectl apply -k .
 echo "All mainnet manifests applied successfully!"
 echo ""
 echo "To check status:"
-echo "  kubectl get all -n service-quality-oracle"
-echo "  kubectl logs -f deployment/service-quality-oracle -n service-quality-oracle"
+echo "  kubectl get all -n rewards-eligibility-oracle"
+echo "  kubectl logs -f deployment/rewards-eligibility-oracle -n rewards-eligibility-oracle"

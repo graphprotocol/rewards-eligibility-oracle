@@ -13,20 +13,10 @@ spec:
     metadata:
       labels:
         app: rewards-eligibility-oracle
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/path: "/metrics"
-        prometheus.io/port: "8000"
     spec:
-      imagePullSecrets:
-        - name: docker-registry
       containers:
       - name: rewards-eligibility-oracle
         image: ghcr.io/graphprotocol/rewards-eligibility-oracle:latest
-        imagePullPolicy: IfNotPresent
-        ports:
-          - containerPort: 8000
-            name: metrics
         envFrom:
         # Load all non-sensitive configuration from ConfigMap
         - configMapRef:
@@ -99,15 +89,6 @@ spec:
             - "import os; assert os.path.exists('/app/healthcheck'), 'Healthcheck file missing'"
           initialDelaySeconds: 10
           periodSeconds: 30
-        securityContext:
-          allowPrivilegeEscalation: false
-          runAsNonRoot: true
-          runAsUser: 1000
-          runAsGroup: 1000
-          readOnlyRootFilesystem: false
-          capabilities:
-            drop:
-            - ALL
       volumes:
       - name: data-volume
         persistentVolumeClaim:
@@ -115,5 +96,4 @@ spec:
       - name: logs-volume
         persistentVolumeClaim:
           claimName: rewards-eligibility-oracle-logs
-      serviceAccountName: rewards-eligibility-oracle
       restartPolicy: Always

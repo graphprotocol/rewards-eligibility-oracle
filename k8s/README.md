@@ -42,7 +42,7 @@ k8s/
 - Kubernetes cluster (version 1.19+)
 - `kubectl` configured to access your cluster
 - Kustomize (built into kubectl v1.14+)
-- Docker image published to `ghcr.io/graphprotocol/service-quality-oracle`
+- Docker image published to `ghcr.io/graphprotocol/rewards-eligibility-oracle`
 - **Storage class configured** (see Storage Configuration below)
 
 ## Quick Start
@@ -74,7 +74,7 @@ vim config.secret.yaml
 ./apply.sh
 
 # Monitor
-kubectl logs -f deployment/service-quality-oracle -n service-quality-oracle
+kubectl logs -f deployment/rewards-eligibility-oracle -n rewards-eligibility-oracle
 ```
 
 ### 3. Deploy to Mainnet
@@ -96,7 +96,7 @@ vim config.yaml
 ./apply.sh
 
 # Monitor
-kubectl logs -f deployment/service-quality-oracle -n service-quality-oracle
+kubectl logs -f deployment/rewards-eligibility-oracle -n rewards-eligibility-oracle
 ```
 
 ## Environment Configuration
@@ -133,6 +133,7 @@ kubectl get storageclass
 ```
 
 **Common storage classes by platform:**
+
 - **AWS EKS**: `gp2`, `gp3`, `ebs-csi`
 - **Google GKE**: `standard`, `ssd`
 - **Azure AKS**: `managed-premium`, `managed`
@@ -149,13 +150,13 @@ kubectl get storageclass
 ### View Logs
 
 ```bash
-kubectl logs -f deployment/service-quality-oracle -n service-quality-oracle
+kubectl logs -f deployment/rewards-eligibility-oracle -n rewards-eligibility-oracle
 ```
 
 ### Check Status
 
 ```bash
-kubectl get all -n service-quality-oracle
+kubectl get all -n rewards-eligibility-oracle
 ```
 
 ### Delete Environment
@@ -177,10 +178,11 @@ kubectl delete -k .
 
 The service uses **two persistent volumes** to maintain state across pod restarts:
 
-- **`service-quality-oracle-data` (10GB)**: Circuit breaker state, last run tracking, BigQuery cache, CSV outputs
-- **`service-quality-oracle-logs` (5GB)**: Application logs
+- **`rewards-eligibility-oracle-data` (10GB)**: Circuit breaker state, last run tracking, BigQuery cache, CSV outputs
+- **`rewards-eligibility-oracle-logs` (5GB)**: Application logs
 
 **Mount points:**
+
 - `/app/data` → Critical state files (circuit breaker, cache, outputs)
 - `/app/logs` → Application logs
 
@@ -190,6 +192,7 @@ The service uses **two persistent volumes** to maintain state across pod restart
 **Sensitive credentials** → `Secret` (generated from `config.secret.yaml`)
 
 This separation provides:
+
 - ✅ Easy configuration updates without rebuilding images
 - ✅ Secure credential management with base64 encoding
 - ✅ Clear separation of concerns
@@ -197,10 +200,12 @@ This separation provides:
 ### Resource Allocation
 
 **Requests (guaranteed):**
+
 - CPU: 250m (0.25 cores)
 - Memory: 512M
 
 **Limits (maximum):**
+
 - CPU: 1000m (1.0 core)
 - Memory: 1G
 
@@ -217,7 +222,7 @@ With persistent volumes, the service maintains:
 
 The deployment uses **file-based health checks** (same as docker-compose):
 
-**Liveness probe:** Checks `/app/healthcheck` file modification time  
+**Liveness probe:** Checks `/app/healthcheck` file modification time
 **Readiness probe:** Verifies `/app/healthcheck` file exists
 
 ## Troubleshooting
@@ -226,11 +231,11 @@ The deployment uses **file-based health checks** (same as docker-compose):
 
 ```bash
 # Check events
-kubectl describe pod -l app=service-quality-oracle
+kubectl describe pod -l app=rewards-eligibility-oracle
 
 # Common issues:
 # - Missing secrets
-# - PVC provisioning failures  
+# - PVC provisioning failures
 # - Image pull errors
 ```
 
@@ -241,28 +246,28 @@ kubectl describe pod -l app=service-quality-oracle
 kubectl get pvc
 
 # Check if volumes are mounted correctly
-kubectl exec -it deployment/service-quality-oracle -- ls -la /app/data
+kubectl exec -it deployment/rewards-eligibility-oracle -- ls -la /app/data
 ```
 
 ### Debug Configuration
 
 ```bash
 # Check environment variables
-kubectl exec -it deployment/service-quality-oracle -- env | grep -E "(BIGQUERY|BLOCKCHAIN)"
+kubectl exec -it deployment/rewards-eligibility-oracle -- env | grep -E "(BIGQUERY|BLOCKCHAIN)"
 
 # Verify secrets are mounted
-kubectl exec -it deployment/service-quality-oracle -- ls -la /etc/secrets
+kubectl exec -it deployment/rewards-eligibility-oracle -- ls -la /etc/secrets
 ```
 
 ## Security
 
-✅ **Never commit actual secrets** - `config.secret.yaml` files contain placeholders only  
-✅ **Mainnet deployment safety checks** for production secrets  
-✅ **Non-root containers** with dropped capabilities  
-✅ **Service account** with minimal BigQuery permissions  
-✅ **Private key** stored in Kubernetes secrets (base64 encoded)  
-✅ **Resource limits** prevent resource exhaustion  
-✅ **Workload Identity** configured for secure GCP access  
+✅ **Never commit actual secrets** - `config.secret.yaml` files contain placeholders only
+✅ **Mainnet deployment safety checks** for production secrets
+✅ **Non-root containers** with dropped capabilities
+✅ **Service account** with minimal BigQuery permissions
+✅ **Private key** stored in Kubernetes secrets (base64 encoded)
+✅ **Resource limits** prevent resource exhaustion
+✅ **Workload Identity** configured for secure GCP access
 ✅ **SSD storage with retention** for data persistence
 
 ## Production Considerations

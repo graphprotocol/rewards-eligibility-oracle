@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Get cluster credentials for service-quality-oracle deployment
+# Get cluster credentials for rewards-eligibility-oracle deployment
 # Update the following values based on your GKE cluster configuration:
 # - PROJECT: Your GCP project ID
 # - CLUSTER: Your GKE cluster name

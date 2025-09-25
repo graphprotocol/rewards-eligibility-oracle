@@ -1,13 +1,13 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: service-quality-oracle
+  name: rewards-eligibility-oracle
   labels:
-    app: service-quality-oracle
+    app: rewards-eligibility-oracle
 spec:
   selector:
     matchLabels:
-      app: service-quality-oracle
+      app: rewards-eligibility-oracle
   endpoints:
   - port: metrics
     path: /metrics

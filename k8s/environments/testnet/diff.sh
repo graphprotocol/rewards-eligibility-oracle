@@ -3,7 +3,7 @@
 set -e
 
 # Show diff of what would change when applying manifests (testnet)
-echo "Showing diff for service-quality-oracle testnet manifests..."
+echo "Showing diff for rewards-eligibility-oracle testnet manifests..."
 
 # Ensure we're authenticated to the correct cluster
 echo "Authenticating to cluster..."

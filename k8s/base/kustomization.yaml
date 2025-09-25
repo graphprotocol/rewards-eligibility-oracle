@@ -7,4 +7,3 @@ resources:
   - service.yaml
   - servicemonitor.yaml
   - serviceaccount.yaml
-  - podmonitor.yaml

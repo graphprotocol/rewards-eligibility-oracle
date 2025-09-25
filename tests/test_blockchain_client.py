@@ -765,11 +765,12 @@ class TestOrchestrationAndBatching:
             blockchain_client._execute_complete_transaction(params)
 
 
-    def test_send_transaction_to_allow_indexers_calls_execution_method(
+    def test_send_transaction_to_renew_indexer_rewards_eligibility_calls_execution_method(
         self, blockchain_client: BlockchainClient, mocker: MockerFixture
     ):
         """
-        Tests that `send_transaction_to_allow_indexers` correctly calls the main execution method.
+        Tests that `send_transaction_to_renew_indexer_rewards_eligibility` correctly calls
+        the main execution method.
         """
         # Arrange
         mock_execute = mocker.patch(
@@ -778,7 +779,7 @@ class TestOrchestrationAndBatching:
         )
 
         # Act
-        tx_hash = blockchain_client.send_transaction_to_allow_indexers(
+        tx_hash = blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility(
             indexer_addresses=[MOCK_SENDER_ADDRESS],
             private_key=MOCK_PRIVATE_KEY,
             chain_id=1,
@@ -796,7 +797,9 @@ class TestOrchestrationAndBatching:
         assert call_args["replace"] is False
 
 
-    def test_batch_allow_indexers_splits_batches_correctly(self, blockchain_client: BlockchainClient):
+    def test_batch_renew_indexer_rewards_eligibility_splits_batches_correctly(
+        self, blockchain_client: BlockchainClient
+    ):
         """
         Tests that the batch processing logic correctly splits a list of addresses
         into multiple transactions based on batch size.
@@ -804,11 +807,11 @@ class TestOrchestrationAndBatching:
         # Arrange
         # Create a list of 5 addresses
         addresses = [f"0x{i}" * 40 for i in range(5)]
-        blockchain_client.send_transaction_to_allow_indexers = MagicMock(return_value="tx_hash")
+        blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility = MagicMock(return_value="tx_hash")
 
         # Act
         # Use a batch size of 2, which should result in 3 calls (2, 2, 1)
-        tx_hashes, rpc_provider = blockchain_client.batch_allow_indexers_issuance_eligibility(
+        tx_hashes, rpc_provider = blockchain_client.batch_renew_indexer_rewards_eligibility(
             indexer_addresses=addresses,
             private_key=MOCK_PRIVATE_KEY,
             chain_id=1,
@@ -819,15 +822,24 @@ class TestOrchestrationAndBatching:
         # Assert
         assert len(tx_hashes) == 3
         assert rpc_provider in blockchain_client.rpc_providers
-        assert blockchain_client.send_transaction_to_allow_indexers.call_count == 3
+        assert blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility.call_count == 3
 
         # Check the contents of each call
-        assert blockchain_client.send_transaction_to_allow_indexers.call_args_list[0][0][0] == addresses[0:2]
-        assert blockchain_client.send_transaction_to_allow_indexers.call_args_list[1][0][0] == addresses[2:4]
-        assert blockchain_client.send_transaction_to_allow_indexers.call_args_list[2][0][0] == addresses[4:5]
+        assert (
+            blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility.call_args_list[0][0][0]
+            == addresses[0:2]
+        )
+        assert (
+            blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility.call_args_list[1][0][0]
+            == addresses[2:4]
+        )
+        assert (
+            blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility.call_args_list[2][0][0]
+            == addresses[4:5]
+        )
 
 
-    def test_batch_allow_indexers_halts_on_failure(self, blockchain_client: BlockchainClient):
+    def test_batch_renew_indexer_rewards_eligibility_halts_on_failure(self, blockchain_client: BlockchainClient):
         """
         Tests that the batch processing halts immediately if one of the transactions fails.
         """
@@ -835,23 +847,23 @@ class TestOrchestrationAndBatching:
         addresses = [f"0x{i}" * 40 for i in range(5)]
 
         # Simulate failure on the second call
-        blockchain_client.send_transaction_to_allow_indexers = MagicMock(
+        blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility = MagicMock(
             side_effect=["tx_hash_1", Exception("RPC Error"), "tx_hash_3"]
         )
 
         # Act & Assert
         with pytest.raises(Exception, match="RPC Error"):
-            blockchain_client.batch_allow_indexers_issuance_eligibility(
+            blockchain_client.batch_renew_indexer_rewards_eligibility(
                 indexer_addresses=addresses,
                 private_key=MOCK_PRIVATE_KEY,
                 chain_id=1,
-                contract_function="allow",
+                contract_function="renewIndexerEligibility",
                 batch_size=2,
             )
 
         # Assert
         # The method should have only been called twice (the first success, the second failure)
-        assert blockchain_client.send_transaction_to_allow_indexers.call_count == 2
+        assert blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility.call_count == 2
 
 
     def test_batch_allow_indexers_handles_empty_list(self, blockchain_client: BlockchainClient):
@@ -859,10 +871,10 @@ class TestOrchestrationAndBatching:
         Tests that batch processing handles an empty list of addresses gracefully.
         """
         # Arrange
-        blockchain_client.send_transaction_to_allow_indexers = MagicMock()
+        blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility = MagicMock()
 
         # Act
-        tx_hashes, rpc_provider = blockchain_client.batch_allow_indexers_issuance_eligibility(
+        tx_hashes, rpc_provider = blockchain_client.batch_renew_indexer_rewards_eligibility(
             indexer_addresses=[],
             private_key=MOCK_PRIVATE_KEY,
             chain_id=1,
@@ -873,4 +885,4 @@ class TestOrchestrationAndBatching:
         # Assert
         assert tx_hashes == []
         assert rpc_provider in blockchain_client.rpc_providers
-        blockchain_client.send_transaction_to_allow_indexers.assert_not_called()
+        blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility.assert_not_called()

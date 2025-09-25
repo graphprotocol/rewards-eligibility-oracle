@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Daily BigQuery performance data fetching from Google BigQuery
 - Indexer eligibility processing based on threshold algorithms
-- On-chain oracle updates to ServiceQualityOracle contract
+- On-chain oracle updates to RewardsEligibilityOracle contract
 - RPC provider failover with circuit breaker pattern
 - Slack notifications for monitoring
 - Docker containerization with health checks

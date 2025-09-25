@@ -88,7 +88,7 @@ def full_valid_config() -> dict:
         "MAX_LATENCY_MS": 5000,
         "MAX_BLOCKS_BEHIND": 100,
         "BLOCKCHAIN_CONTRACT_ADDRESS": "0x1234",
-        "BLOCKCHAIN_FUNCTION_NAME": "allow",
+        "BLOCKCHAIN_FUNCTION_NAME": "renewIndexerEligibility",
         "BLOCKCHAIN_CHAIN_ID": 1,
         "BLOCKCHAIN_RPC_URLS": ["http://test.com"],
         "BLOCK_EXPLORER_URL": "http://etherscan.io",

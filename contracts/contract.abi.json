@@ -65,19 +65,19 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "oldPeriod",
         "type": "uint256"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "newPeriod",
         "type": "uint256"
       }
     ],
-    "name": "AllowedPeriodUpdated",
+    "name": "EligibilityPeriodUpdated",
     "type": "event"
   },
   {
@@ -85,18 +85,12 @@
     "inputs": [
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "indexer",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "oracle",
-        "type": "address"
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
       }
     ],
-    "name": "IndexerAllowed",
+    "name": "EligibilityValidationUpdated",
     "type": "event"
   },
   {
@@ -115,7 +109,26 @@
         "type": "bytes"
       }
     ],
-    "name": "IndexerQualityData",
+    "name": "IndexerEligibilityData",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "indexer",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "oracle",
+        "type": "address"
+      }
+    ],
+    "name": "IndexerEligibilityRenewed",
     "type": "event"
   },
   {
@@ -135,13 +148,13 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "oldTimeout",
         "type": "uint256"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "newTimeout",
         "type": "uint256"
@@ -161,19 +174,6 @@
       }
     ],
     "name": "Paused",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "bool",
-        "name": "active",
-        "type": "bool"
-      }
-    ],
-    "name": "QualityCheckingUpdated",
     "type": "event"
   },
   {
@@ -343,32 +343,8 @@
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address[]",
-        "name": "indexers",
-        "type": "address[]"
-      },
-      {
-        "internalType": "bytes",
-        "name": "data",
-        "type": "bytes"
-      }
-    ],
-    "name": "allowIndexers",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [],
-    "name": "getAllowedPeriod",
+    "name": "getEligibilityPeriod",
     "outputs": [
       {
         "internalType": "uint256",
@@ -387,12 +363,25 @@
         "type": "address"
       }
     ],
-    "name": "getLastAllowedTime",
+    "name": "getEligibilityRenewalTime",
     "outputs": [
       {
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getEligibilityValidation",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -506,39 +495,7 @@
         "type": "address"
       }
     ],
-    "name": "isAllowed",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "oracle",
-        "type": "address"
-      }
-    ],
-    "name": "isAuthorizedOracle",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "isQualityCheckingActive",
+    "name": "isEligible",
     "outputs": [
       {
         "internalType": "bool",
@@ -567,6 +524,30 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "indexers",
+        "type": "address[]"
+      },
+      {
+        "internalType": "bytes",
+        "name": "data",
+        "type": "bytes"
+      }
+    ],
+    "name": "renewIndexerEligibility",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -609,11 +590,30 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "allowedPeriod",
+        "name": "eligibilityPeriod",
         "type": "uint256"
       }
     ],
-    "name": "setAllowedPeriod",
+    "name": "setEligibilityPeriod",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
+      }
+    ],
+    "name": "setEligibilityValidation",
     "outputs": [
       {
         "internalType": "bool",
@@ -633,25 +633,6 @@
       }
     ],
     "name": "setOracleUpdateTimeout",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bool",
-        "name": "enabled",
-        "type": "bool"
-      }
-    ],
-    "name": "setQualityChecking",
     "outputs": [
       {
         "internalType": "bool",

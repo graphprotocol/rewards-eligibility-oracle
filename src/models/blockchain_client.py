@@ -529,7 +529,7 @@ class BlockchainClient:
         return self._send_signed_transaction(signed_tx)
 
 
-    def send_transaction_to_allow_indexers(
+    def send_transaction_to_renew_indexer_rewards_eligibility(
         self,
         indexer_addresses: List[str],
         private_key: str,
@@ -539,7 +539,7 @@ class BlockchainClient:
         data_bytes: bytes = b"",
     ) -> str:
         """
-        Sends a single transaction to allow a list of indexers to claim issuance rewards.
+        Sends a single transaction to renew indexer rewards eligibility for a list of indexers.
 
         Args:
             indexer_addresses: A list of indexer addresses to be processed in the transaction.
@@ -574,7 +574,7 @@ class BlockchainClient:
         return self._execute_complete_transaction(transaction_params)
 
 
-    def batch_allow_indexers_issuance_eligibility(
+    def batch_renew_indexer_rewards_eligibility(
         self,
         indexer_addresses: List[str],
         private_key: str,
@@ -585,7 +585,7 @@ class BlockchainClient:
         data_bytes: bytes = b"",
     ) -> tuple[List[str], str]:
         """
-        Batches indexer addresses and sends multiple transactions for issuance eligibility.
+        Batches indexer addresses and sends multiple transactions for renewing rewards eligibility.
 
         This function splits a large list of indexer addresses into smaller batches
         and sends a separate transaction for each batch to manage gas limits and
@@ -623,7 +623,7 @@ class BlockchainClient:
 
             try:
                 # Execute the transaction for the current batch
-                tx_hash = self.send_transaction_to_allow_indexers(
+                tx_hash = self.send_transaction_to_renew_indexer_rewards_eligibility(
                     batch,
                     private_key,
                     chain_id,

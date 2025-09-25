@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Service Quality Oracle is a Python-based Docker containerized service that:
 - Fetches indexer performance data from Google BigQuery daily at 10:00 UTC
 - Processes data to determine indexer issuance rewards eligibility based on threshold algorithms
-- Posts eligibility updates on-chain to the ServiceQualityOracle contract
+- Posts eligibility updates on-chain to the RewardsEligibilityOracle contract
 - Implements resilient RPC failover with circuit breaker pattern
 - Sends Slack notifications for monitoring
 

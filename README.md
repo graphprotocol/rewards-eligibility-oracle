@@ -2,14 +2,14 @@
 
 ## Overview
 
-This repository implements a Docker container service for the Service Quality Oracle. The oracle consumes data from BigQuery, processes it to determine indexer issuance rewards eligibility, based on a defined threshold algorithm, and posts issuance eligibility data on-chain.
+This repository implements a Docker container service for the Rewards Eligibility Oracle. The oracle consumes data from BigQuery, processes it to determine indexer rewards eligibility, based on a defined threshold algorithm, and posts rewards eligibility data on-chain.
 
 ### Key Features
 
 The oracle runs with the following functionality:
 - **BigQuery Integration**: Fetches indexer performance data from Google BigQuery
-- **Eligibility Processing**: Applies threshold algorithm to determine issuance rewards eligibility based on service quality
-- **Blockchain Integration**: Posts issuance eligibility updates to the ServiceQualityOracle contract
+- **Eligibility Processing**: Applies threshold algorithm to determine rewards eligibility based on service quality
+- **Blockchain Integration**: Posts rewards eligibility updates to the RewardsEligibilityOracle contract
 - **Slack Notifications**: Sends success/failure notifications for monitoring
 - **Docker Deployment**: Containerized and running with health checks
 - **Scheduled Execution**: Runs daily at 10:00 UTC
@@ -43,7 +43,7 @@ export SLACK_WEBHOOK_URL="your_webhook_url"
 
 ## Eligibility Criteria
 
-Please refer to the [ELIGIBILITY_CRITERIA.md](./ELIGIBILITY_CRITERIA.md) file to view the latest criteria for issuance. We are also posting upcoming criteria in that document.
+Please refer to the [ELIGIBILITY_CRITERIA.md](./ELIGIBILITY_CRITERIA.md) file to view the latest criteria for rewards eligibility. We are also posting upcoming criteria in that document.
 
 ## Data Flow
 

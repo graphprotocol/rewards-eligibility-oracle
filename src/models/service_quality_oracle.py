@@ -142,7 +142,7 @@ def main(run_date_override: date = None):
             tx_timeout_seconds=config["TX_TIMEOUT_SECONDS"],
             slack_notifier=slack_notifier,
         )
-        transaction_links, rpc_provider_used = blockchain_client.batch_allow_indexers_issuance_eligibility(
+        transaction_links, rpc_provider_used = blockchain_client.batch_renew_indexer_rewards_eligibility(
             indexer_addresses=eligible_indexers,
             private_key=config["PRIVATE_KEY"],
             chain_id=config["BLOCKCHAIN_CHAIN_ID"],

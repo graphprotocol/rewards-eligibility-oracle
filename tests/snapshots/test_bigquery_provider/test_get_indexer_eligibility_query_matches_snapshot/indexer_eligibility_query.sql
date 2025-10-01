@@ -27,7 +27,7 @@
                 indexer,
                 day,
                 unique_subgraphs_served,
-                CASE WHEN good_responses >= 1 AND unique_subgraphs_served >= 10
+                CASE WHEN good_responses >= 1 AND unique_subgraphs_served >= 1
                     THEN 1 ELSE 0
                 END AS is_online_day
             FROM

@@ -18,7 +18,7 @@ data:
 
   # Blockchain Configuration (Arbitrum Sepolia)
   BLOCKCHAIN_CONTRACT_ADDRESS: "0x6d5550698F930210c3f50efe744bF51C55D791f6"
-  BLOCKCHAIN_FUNCTION_NAME: "allowIndexers"
+  BLOCKCHAIN_FUNCTION_NAME: "renewIndexerEligibility"
   BLOCKCHAIN_CHAIN_ID: "421614"
   BLOCK_EXPLORER_URL: "https://sepolia.arbiscan.io"
   TX_TIMEOUT_SECONDS: "30"
@@ -46,7 +46,7 @@ data:
 
   # Eligibility Criteria
   MIN_ONLINE_DAYS: "5"
-  MIN_SUBGRAPHS: "10"
+  MIN_SUBGRAPHS: "1"
   MAX_LATENCY_MS: "5000"
   MAX_BLOCKS_BEHIND: "50000"
   MIN_CURATION_SIGNAL: "500"

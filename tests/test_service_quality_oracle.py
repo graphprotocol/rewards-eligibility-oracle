@@ -18,7 +18,7 @@ MOCK_CONFIG = {
     "BIGQUERY_TABLE_ID": "test-tbl",
     "BIGQUERY_LOCATION_ID": "us-central1",
     "MIN_ONLINE_DAYS": 5,
-    "MIN_SUBGRAPHS": 10,
+    "MIN_SUBGRAPHS": 1,
     "MAX_LATENCY_MS": 5000,
     "MAX_BLOCKS_BEHIND": 100,
     "MAX_AGE_BEFORE_DELETION": 90,
@@ -31,7 +31,7 @@ MOCK_CONFIG = {
     "TX_TIMEOUT_SECONDS": 180,
     "PRIVATE_KEY": "0xfakekey",
     "BLOCKCHAIN_CHAIN_ID": 1,
-    "BLOCKCHAIN_FUNCTION_NAME": "allow",
+    "BLOCKCHAIN_FUNCTION_NAME": "renewIndexerEligibility",
     "BATCH_SIZE": 100,
     "SCHEDULED_RUN_TIME": "10:00",
     "SUBGRAPH_URL_PRE_PRODUCTION": "http://fake.url",
@@ -78,7 +78,7 @@ def oracle_context():
         mock_pipeline.load_eligible_indexers_from_csv.return_value = ["0xEligible"]
 
         mock_client = mock_client_cls.return_value
-        mock_client.batch_allow_indexers_issuance_eligibility.return_value = (
+        mock_client.batch_renew_indexer_rewards_eligibility.return_value = (
             ["http://tx-link"],
             "https://test-rpc.com",
         )
@@ -127,7 +127,7 @@ def test_main_succeeds_on_happy_path(oracle_context):
     ctx["pipeline"].clean_old_date_directories.assert_called_once_with(MOCK_CONFIG["MAX_AGE_BEFORE_DELETION"])
 
     ctx["client_cls"].assert_called_once()
-    ctx["client"].batch_allow_indexers_issuance_eligibility.assert_called_once_with(
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once_with(
         indexer_addresses=["0xEligible"],
         private_key=MOCK_CONFIG["PRIVATE_KEY"],
         chain_id=MOCK_CONFIG["BLOCKCHAIN_CHAIN_ID"],
@@ -165,7 +165,7 @@ def test_main_handles_failures_at_each_stage(oracle_context, failing_component, 
         "bq_provider": ctx["bq_provider"].fetch_indexer_issuance_eligibility_data,
         "pipeline_process": ctx["pipeline"].process,
         "pipeline_clean": ctx["pipeline"].clean_old_date_directories,
-        "client": ctx["client"].batch_allow_indexers_issuance_eligibility,
+        "client": ctx["client"].batch_renew_indexer_rewards_eligibility,
     }
     mock_to_fail = mock_map[failing_component]
     mock_to_fail.side_effect = error
@@ -208,7 +208,7 @@ def test_main_succeeds_with_no_eligible_indexers(oracle_context):
 
     ctx["main"]()
 
-    ctx["client"].batch_allow_indexers_issuance_eligibility.assert_called_once_with(
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once_with(
         indexer_addresses=[],
         private_key=MOCK_CONFIG["PRIVATE_KEY"],
         chain_id=MOCK_CONFIG["BLOCKCHAIN_CHAIN_ID"],
@@ -228,7 +228,7 @@ def test_main_succeeds_when_slack_is_not_configured(oracle_context):
     ctx["main"]()
 
     ctx["load_config"].assert_called_once()
-    ctx["client"].batch_allow_indexers_issuance_eligibility.assert_called_once()
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
     ctx["circuit_breaker"].reset.assert_called_once()
     ctx["slack"]["notifier"].send_success_notification.assert_not_called()
     ctx["slack"]["notifier"].send_failure_notification.assert_not_called()
@@ -288,11 +288,11 @@ def test_main_uses_cached_data_when_fresh(oracle_context):
     # Should NOT call process (since we're using cached data)
     ctx["pipeline"].process.assert_not_called()
     # Should still call blockchain submission with cached indexers
-    ctx["client"].batch_allow_indexers_issuance_eligibility.assert_called_once_with(
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once_with(
         indexer_addresses=["0xCachedEligible"],
         private_key="0xfakekey",
         chain_id=1,
-        contract_function="allow",
+        contract_function="renewIndexerEligibility",
         batch_size=100,
         replace=True,
     )

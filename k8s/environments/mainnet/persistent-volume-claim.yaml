@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rewards-eligibility-oracle-data
+  labels:
+    app: rewards-eligibility-oracle
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: "ssd-retain"  # Production storage class with retention
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rewards-eligibility-oracle-logs
+  labels:
+    app: rewards-eligibility-oracle
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: "ssd-retain"  # Production storage class with retention

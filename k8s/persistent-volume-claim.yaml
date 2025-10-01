@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: service-quality-oracle-data
+  name: rewards-eligibility-oracle-data
   labels:
-    app: service-quality-oracle
+    app: rewards-eligibility-oracle
 spec:
   accessModes:
     - ReadWriteOnce
@@ -13,7 +13,7 @@ spec:
   # Storage class - uncomment and modify based on your cluster:
   # storageClassName: ""           # Use default storage class (most common)
   # storageClassName: "gp2"        # AWS EKS
-  # storageClassName: "standard"   # GKE  
+  # storageClassName: "standard"   # GKE
   # storageClassName: "managed-premium"  # Azure AKS
   # storageClassName: "local-path" # K3s/Rancher
   # storageClassName: "hostpath"   # Local development
@@ -22,9 +22,9 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: service-quality-oracle-logs
+  name: rewards-eligibility-oracle-logs
   labels:
-    app: service-quality-oracle
+    app: rewards-eligibility-oracle
 spec:
   accessModes:
     - ReadWriteOnce

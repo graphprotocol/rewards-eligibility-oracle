@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rewards-eligibility-oracle
+  labels:
+    app: rewards-eligibility-oracle
+spec:
+  selector:
+    app: rewards-eligibility-oracle
+  ports:
+    - name: metrics
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP

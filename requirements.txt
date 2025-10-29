@@ -24,7 +24,7 @@ eth-account==0.13.7
 eth-typing==5.2.1
 
 # GraphQL and subgraph integration (for future subgraph functionality)
-gql==3.5.3
+gql==4.0.0
 
 # HTTP and API
 requests==2.32.4

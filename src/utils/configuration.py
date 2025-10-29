@@ -350,8 +350,19 @@ class CredentialManager:
             # Cache credentials
             self._credentials_cache = credentials
 
+            # Log credential details for verification
             creds_source = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "ADC")
-            logger.info(f"Loaded Google Cloud credentials from {creds_source} for project {project}")
+            cred_type = type(credentials).__name__
+
+            # Show service account email if available (service accounts have this attribute)
+            if hasattr(credentials, 'service_account_email'):
+                logger.info(
+                    f"Loaded {cred_type} credentials from {creds_source} "
+                    f"for project {project} (service account: {credentials.service_account_email})"
+                )
+
+            else:
+                logger.info(f"Loaded {cred_type} credentials from {creds_source} for project {project}")
 
             return credentials
 

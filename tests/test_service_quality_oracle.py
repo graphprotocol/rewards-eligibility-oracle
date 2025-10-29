@@ -47,7 +47,7 @@ MOCK_CONFIG = {
 def oracle_context():
     """Patch all external dependencies and reload the oracle module to pick them up."""
     with (
-        patch("src.utils.configuration.credential_manager.setup_google_credentials") as mock_setup_creds,
+        patch("src.utils.configuration.credential_manager.get_google_credentials") as mock_get_creds,
         patch("src.utils.configuration.load_config", return_value=MOCK_CONFIG) as mock_load_config,
         patch("src.utils.slack_notifier.create_slack_notifier") as mock_create_slack,
         patch("src.models.bigquery_provider.BigQueryProvider") as mock_bq_provider_cls,
@@ -86,6 +86,11 @@ def oracle_context():
         # Configure Slack notifier
         mock_slack_notifier = mock_create_slack.return_value
 
+        # Configure mock credentials return value
+        mock_credentials = MagicMock()
+        mock_credentials.valid = True
+        mock_get_creds.return_value = mock_credentials
+
         # Reload module so that patched objects are used inside it
         if "src.models.service_quality_oracle" in sys.modules:
             del sys.modules["src.models.service_quality_oracle"]
@@ -95,7 +100,7 @@ def oracle_context():
 
         yield {
             "main": sqo.main,
-            "setup_creds": mock_setup_creds,
+            "get_creds": mock_get_creds,
             "load_config": mock_load_config,
             "slack": {"create": mock_create_slack, "notifier": mock_slack_notifier},
             "bq_provider_cls": mock_bq_provider_cls,
@@ -115,7 +120,7 @@ def test_main_succeeds_on_happy_path(oracle_context):
     ctx = oracle_context
     ctx["main"]()
 
-    ctx["setup_creds"].assert_called_once()
+    ctx["get_creds"].assert_called_once()
     ctx["load_config"].assert_called_once()
     ctx["slack"]["create"].assert_called_once_with(MOCK_CONFIG["SLACK_WEBHOOK_URL"])
 
@@ -144,7 +149,7 @@ def test_main_succeeds_on_happy_path(oracle_context):
 @pytest.mark.parametrize(
     "failing_component, expected_stage",
     [
-        ("setup_creds", "Initialization"),
+        ("get_creds", "Initialization"),
         ("load_config", "Initialization"),
         ("slack_create", "Initialization"),
         ("bq_provider", "Data Fetching from BigQuery"),
@@ -159,7 +164,7 @@ def test_main_handles_failures_at_each_stage(oracle_context, failing_component, 
     error = Exception(f"{failing_component} error")
 
     mock_map = {
-        "setup_creds": ctx["setup_creds"],
+        "get_creds": ctx["get_creds"],
         "load_config": ctx["load_config"],
         "slack_create": ctx["slack"]["create"],
         "bq_provider": ctx["bq_provider"].fetch_indexer_issuance_eligibility_data,

@@ -159,9 +159,19 @@ class Scheduler:
         try:
             validate_all_required_env_vars()
 
-            credential_manager.setup_google_credentials()
+            # Validate credentials early (Fail Fast)
+            try:
+                credential_manager.get_google_credentials()
+                logger.info("Google Cloud credentials validated successfully")
+
+            except ValueError as e:
+                logger.error(f"Failed to validate Google Cloud credentials: {e}")
+                raise
+
+            # Load configuration
             config = load_config()
 
+            # Create Slack notifier
             self.slack_notifier = create_slack_notifier(config.get("SLACK_WEBHOOK_URL"))
             if self.slack_notifier:
                 logger.info("Slack notifications enabled for scheduler")

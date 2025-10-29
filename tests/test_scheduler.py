@@ -97,7 +97,7 @@ class TestSchedulerInitialization:
             scheduler = Scheduler()
 
             mock_dependencies.validate.assert_called_once()
-            mock_dependencies.creds.setup_google_credentials.assert_called_once()
+            mock_dependencies.creds.get_google_credentials.assert_called_once()
             mock_dependencies.load_config.assert_called_once()
             mock_dependencies.create_slack.assert_called_once_with(MOCK_CONFIG["SLACK_WEBHOOK_URL"])
             mock_dependencies.os.environ.get.assert_any_call("RUN_ON_STARTUP", "false")

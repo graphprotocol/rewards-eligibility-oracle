@@ -175,10 +175,6 @@ The system follows a clear data pipeline with daily scheduled execution:
 3. Contact repository administrators to discuss history rewriting if necessary
 4. Consider the credential permanently compromised
 
-# Session Context Import
-
-@./SESSION_CONTEXT.md
-
 # Style Guidelines Import
 
 @./STYLE_GUIDELINES.md

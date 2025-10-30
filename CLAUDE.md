@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 Service Quality Oracle is a Python-based Docker containerized service that:
+
 - Fetches indexer performance data from Google BigQuery daily at 10:00 UTC
 - Processes data to determine indexer issuance rewards eligibility based on threshold algorithms
 - Posts eligibility updates on-chain to the RewardsEligibilityOracle contract
@@ -14,6 +15,7 @@ Service Quality Oracle is a Python-based Docker containerized service that:
 ## Key Commands
 
 ### Development Setup
+
 ```bash
 # Create and activate virtual environment
 python3 -m venv venv
@@ -24,6 +26,7 @@ pip install -r requirements.txt
 ```
 
 ### Linting and Formatting
+
 ```bash
 # CRITICAL: Always run this before committing - CI enforces this
 ./scripts/ruff_check_format_assets.sh
@@ -34,6 +37,7 @@ bandit -r src/
 ```
 
 ### Testing
+
 ```bash
 # Run all tests with coverage
 pytest
@@ -49,6 +53,7 @@ pytest -v
 ```
 
 ### Docker Operations
+
 ```bash
 # Build and run with Docker Compose
 docker-compose up --build -d
@@ -61,6 +66,7 @@ docker-compose ps
 ```
 
 ### Test Notifications
+
 ```bash
 # Test Slack webhook
 export SLACK_WEBHOOK_URL="your_webhook_url"
@@ -88,28 +94,33 @@ The system follows a clear data pipeline with daily scheduled execution:
 ## Critical Implementation Details
 
 ### RPC Failover Strategy
+
 - Multiple RPC providers configured with automatic rotation on failure
 - Each provider gets 5 retry attempts with exponential backoff
 - Circuit breaker prevents cascade failures
 - Slack notifications sent on provider rotation
 
 ### Configuration Management
+
 - Primary config in `config.toml` (never commit actual values)
 - Sensitive data via environment variables (BLOCKCHAIN_PRIVATE_KEY, etc.)
 - Google Cloud auth via GOOGLE_APPLICATION_CREDENTIALS or credentials.json
 
 ### Data Persistence
+
 - Last successful run date stored in `/app/data/last_run.txt`
 - CSV outputs saved to `/app/data/output/YYYY-MM-DD/`
 - Catch-up mechanism limits to 7 days of historical data to control BigQuery costs
 
 ### Testing Patterns
+
 - Extensive use of mocks for external services (BigQuery, Web3, Slack)
 - Snapshot testing for SQL queries via pytest-snapshot
 - Parametrized tests for edge cases
 - All new features require corresponding tests
 
 ### Error Handling
+
 - Retryable errors handled with exponential backoff via tenacity
 - Non-retryable errors trigger immediate failure and notifications
 - All exceptions logged with context before re-raising
@@ -118,23 +129,27 @@ The system follows a clear data pipeline with daily scheduled execution:
 ## Development Guidelines
 
 ### Before Making Changes
+
 1. Read ELIGIBILITY_CRITERIA.md to understand current indexer requirements
 2. Check existing patterns in similar files
 3. Run tests to ensure baseline functionality
 
 ### Code Style Enforcement
+
 - Ruff configuration in pyproject.toml enforces strict formatting
 - Custom formatter applies additional spacing rules
 - Line length limit: 115 characters
 - Import sorting via isort rules
 
 ### Git Safety Guidelines
+
 - **NEVER use `git push --force`** - this can overwrite remote history and cause data loss
 - **Always use `git push --force-with-lease`** if you must force push - it checks that remote hasn't changed
 - Prefer rebasing and clean history over force pushing when possible
 - Always communicate with team before any history rewriting operations
 
 ### PR Requirements
+
 - Must pass `./scripts/ruff_check_format_assets.sh` without changes
 - All tests must pass
 - Docker build must succeed

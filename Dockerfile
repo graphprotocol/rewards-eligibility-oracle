@@ -1,6 +1,6 @@
 # Dockerfile to create a clean, lightweight Docker Image for the Service Quality Oracle
 
-# Use Python 3.9 slim as the base image for a lightweight container
+# Use Python 3.13.7 slim as the base image for a lightweight container
 FROM python:3.13.7-slim
 
 # Accept version as build argument

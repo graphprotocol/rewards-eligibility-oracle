@@ -4,9 +4,25 @@ This document explains the CD process for the Service Quality Oracle project.
 
 ## Overview
 
-The CD process automates building, versioning, and releasing Docker images when you're ready to deploy. It uses semantic versioning (v0.0.1, v0.0.2, etc.) and publishes images to GitHub Container Registry.
+The repository uses **release-please** for automated changelog management and semantic versioning. Docker images are automatically built and published when releases are created.
 
-## How It Works
+**For the recommended automated workflow**, see [RELEASE_PROCESS.md](./RELEASE_PROCESS.md).
+
+This document covers the legacy manual release process, which is still available for urgent hotfixes.
+
+## Automated Release Workflow (Recommended)
+
+1. Use conventional commits (`feat:`, `fix:`, `chore:`, etc.)
+2. Push to `main` branch
+3. release-please creates a Release PR automatically
+4. Review and merge the Release PR
+5. Docker images are built and published automatically
+
+See [RELEASE_PROCESS.md](./RELEASE_PROCESS.md) for full details.
+
+## Manual Release Workflow (Hotfixes Only)
+
+For urgent hotfixes when you need immediate deployment:
 
 ### 1. Merge PRs to Main
 

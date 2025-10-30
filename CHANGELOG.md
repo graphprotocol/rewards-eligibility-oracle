@@ -7,18 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Apply markdownlint formatting to documentation files
+- Update Python to 3.13.7 with limited workflow permissions (#43)
+- Update Docker image to v0.3.0 (#44)
+
+## [0.3.0] - 2025-10-30
+
 ### Added
 
-- Continuous deployment pipeline with manual version control
-- Multi-architecture Docker builds (amd64/arm64)
-- GitHub Container Registry publishing
-- Automated semantic versioning and Git tagging
-- Release notes generation with changelogs
-- CD process documentation
+- Dependabot configuration for automated dependency updates (#16)
+- CODEOWNERS file for code review assignments (#26)
 
 ### Changed
 
-- Dockerfile now accepts VERSION build argument for dynamic versioning
+- Improved Google Cloud credential handling with better error messages (#42)
+- Renamed contract from IssuanceEligibilityOracle to RewardsEligibilityOracle (#39)
+- Updated contract ABI to match deployed ServiceQualityOracle (#24)
+- Updated to production Docker image configuration (#16, #25)
+- Python upgraded from 3.11-slim to 3.13.7-slim (#30)
+
+### Dependencies
+
+- Bumped python-dependencies group with 13 updates (#40)
+- Bumped python-dependencies group with 10 updates (#22)
+- Updated types-pytz from 2025.2.0.20250516 to 2025.2.0.20250809 (#29)
+- Updated types-requests from 2.32.4.20250611 to 2.32.4.20250809 (#27)
+- Updated tenacity from 8.5.0 to 9.1.2 (#23)
+- Updated gql from 3.5.3 to 4.0.0 (#34)
+- Updated actions/setup-python from 4 to 5, then 5 to 6 (#19, #35)
+- Updated actions/checkout from 4 to 5 (#31)
+- Updated actions/cache from 3 to 4 (#21)
+- Updated docker/build-push-action from 5 to 6 (#18)
+- Updated softprops/action-gh-release from 1 to 2 (#17)
+
+## [0.2.2] - 2025-07-31
+
+### Fixed
+
+- Updated contract ABI to match deployed ServiceQualityOracle (#24)
+
+### Added
+
+- Dependabot configuration for automated dependency updates (#16)
+- Production Docker image configuration (#16)
+
+## [0.2.1] - 2025-07-31
+
+### Added
+
+- Clickable transaction links in notifications for easier verification (#15)
+- Python style guidelines documentation (#15)
+
+## [0.2.0] - 2025-07-30
+
+### Added
+
+- Kubernetes deployment support with manifests and documentation (#14)
+- Persistent volume configurations for data and logs
+- ConfigMap and Secret management for Kubernetes
+- Resource allocation and health check configurations
 
 ## [0.1.0] - 2025-07-25
 

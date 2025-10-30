@@ -1,0 +1,62 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "service-quality-oracle",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "docker-compose.yml"
+      ]
+    }
+  },
+  "release-search-depth": 100,
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "Added",
+      "hidden": false
+    },
+    {
+      "type": "fix",
+      "section": "Fixed",
+      "hidden": false
+    },
+    {
+      "type": "refactor",
+      "section": "Changed",
+      "hidden": false
+    },
+    {
+      "type": "chore",
+      "section": "Changed",
+      "hidden": false
+    },
+    {
+      "type": "docs",
+      "section": "Documentation",
+      "hidden": false
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": false
+    },
+    {
+      "type": "build",
+      "section": "Build System",
+      "hidden": false
+    },
+    {
+      "type": "ci",
+      "section": "CI/CD",
+      "hidden": false
+    },
+    {
+      "type": "deps",
+      "section": "Dependencies",
+      "hidden": false
+    }
+  ]
+}

@@ -1,6 +1,11 @@
 name: CD - Build and Release
 
 on:
+  # Trigger on tags created by release-please
+  push:
+    tags:
+      - 'v*.*.*'
+  # Keep manual workflow dispatch for hotfixes
   workflow_dispatch:
     inputs:
       version_type:
@@ -30,48 +35,53 @@ jobs:
         with:
           fetch-depth: 0  # Need full history for tags
 
-      - name: Get latest version tag
-        id: get_version
-        run: |
-          # Get the latest semantic version tag
-          LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "v0.0.0")
-          echo "Latest tag: $LATEST_TAG"
-          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-
-      - name: Calculate new version
+      - name: Get version from tag or calculate
         id: version
         run: |
-          LATEST_TAG="${{ steps.get_version.outputs.latest_tag }}"
-          echo "previous_version=$LATEST_TAG" >> $GITHUB_OUTPUT
-          
-          # Extract version components
-          VERSION_WITHOUT_V="${LATEST_TAG#v}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_WITHOUT_V"
-          
-          # Default to 0.0.0 if no valid version found
-          MAJOR=${MAJOR:-0}
-          MINOR=${MINOR:-0}
-          PATCH=${PATCH:-0}
-          
-          # Increment based on input
-          case "${{ github.event.inputs.version_type }}" in
-            major)
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-              ;;
-            minor)
-              MINOR=$((MINOR + 1))
-              PATCH=0
-              ;;
-            patch)
-              PATCH=$((PATCH + 1))
-              ;;
-          esac
-          
-          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
-          echo "New version: $NEW_VERSION"
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          # If triggered by tag push, use that tag
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            NEW_VERSION="${GITHUB_REF#refs/tags/}"
+            echo "Version from tag: $NEW_VERSION"
+
+            # Get previous version for changelog
+            PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "$NEW_VERSION" | head -1 || echo "v0.0.0")
+            echo "previous_version=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          else
+            # Manual workflow dispatch - calculate version
+            LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "v0.0.0")
+            echo "Latest tag: $LATEST_TAG"
+            echo "previous_version=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+            # Extract version components
+            VERSION_WITHOUT_V="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_WITHOUT_V"
+
+            # Default to 0.0.0 if no valid version found
+            MAJOR=${MAJOR:-0}
+            MINOR=${MINOR:-0}
+            PATCH=${PATCH:-0}
+
+            # Increment based on input
+            case "${{ github.event.inputs.version_type }}" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+
+            NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "New version: $NEW_VERSION"
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          fi
 
   build-and-push:
     name: Build and Push Docker Image
@@ -119,6 +129,8 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    # Only run for manual workflow dispatch (release-please already creates releases)
+    if: github.event_name == 'workflow_dispatch'
     needs: [version, build-and-push]
     permissions:
       contents: write
@@ -141,23 +153,23 @@ jobs:
           # Generate changelog between versions
           PREV_TAG="${{ needs.version.outputs.previous_version }}"
           NEW_TAG="${{ needs.version.outputs.version }}"
-          
+
           {
             echo "## What's Changed"
             echo ""
-            
+
             if [ "$PREV_TAG" = "v0.0.0" ]; then
               echo "Initial release 🎉"
             else
               # Get PR merge commits
               git log ${PREV_TAG}..HEAD --merges --pretty=format:"* %s" | grep -E "Merge pull request #[0-9]+" || true
-              
+
               # Get direct commits (non-merge)
               echo ""
               echo "### Direct commits"
               git log ${PREV_TAG}..HEAD --no-merges --pretty=format:"* %s (%an)" || true
             fi
-            
+
             echo ""
             echo "## Docker Image"
             echo ""

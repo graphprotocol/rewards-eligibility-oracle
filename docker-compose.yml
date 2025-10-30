@@ -9,7 +9,7 @@ services:
     container_name: service-quality-oracle
 
     # Set the image name
-    image: ghcr.io/graphprotocol/service-quality-oracle:v0.3.0
+    image: ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.3.0
 
     volumes:
       # Mount data directory to store data

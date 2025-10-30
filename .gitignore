@@ -92,3 +92,4 @@ SESSION_CONTEXT.md
 
 # Claude directory - we keep .claude/ for team sharing but ignore system files within it
 .claude/.DS_Store
+/keys

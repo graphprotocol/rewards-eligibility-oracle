@@ -5,6 +5,7 @@ Unit tests for the BigQueryProvider.
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+import google.auth.credentials
 import pandas as pd
 import pytest
 from requests.exceptions import ConnectionError
@@ -61,6 +62,79 @@ def provider(mock_bpd: MagicMock) -> BigQueryProvider:
         max_latency_ms=MOCK_MAX_LATENCY_MS,
         max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
     )
+
+
+@pytest.fixture
+def mock_credentials() -> MagicMock:
+    """Fixture providing mock Google credentials for testing explicit credential passing"""
+    creds = MagicMock(spec=google.auth.credentials.Credentials)
+    creds.valid = True
+    creds.expired = False
+    return creds
+
+
+@pytest.fixture
+def provider_with_credentials(mock_bpd: MagicMock, mock_credentials: MagicMock) -> BigQueryProvider:
+    """Fixture to create BigQueryProvider with explicit credentials for testing dependency injection"""
+    return BigQueryProvider(
+        project=MOCK_PROJECT,
+        location=MOCK_LOCATION,
+        table_name=MOCK_TABLE_NAME,
+        min_online_days=MOCK_MIN_ONLINE_DAYS,
+        min_subgraphs=MOCK_MIN_SUBGRAPHS,
+        max_latency_ms=MOCK_MAX_LATENCY_MS,
+        max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
+        credentials=mock_credentials,
+    )
+
+
+class TestCredentialInjection:
+    """Tests for explicit credential passing to BigQueryProvider"""
+
+
+    def test_init_accepts_explicit_credentials(self, mock_bpd: MagicMock, mock_credentials: MagicMock):
+        """
+        GIVEN Mock Credentials object
+        WHEN BigQueryProvider instantiated with credentials
+        THEN Credentials configured in BigQuery options
+        """
+        # Act
+        provider = BigQueryProvider(
+            project=MOCK_PROJECT,
+            location=MOCK_LOCATION,
+            table_name=MOCK_TABLE_NAME,
+            min_online_days=MOCK_MIN_ONLINE_DAYS,
+            min_subgraphs=MOCK_MIN_SUBGRAPHS,
+            max_latency_ms=MOCK_MAX_LATENCY_MS,
+            max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
+            credentials=mock_credentials,
+        )
+
+        # Assert
+        assert mock_bpd.options.bigquery.credentials == mock_credentials
+        assert provider.credentials == mock_credentials
+
+
+    def test_init_works_without_explicit_credentials(self, mock_bpd: MagicMock):
+        """
+        GIVEN No credentials parameter
+        WHEN BigQueryProvider instantiated
+        THEN Falls back to ADC, no errors
+        """
+        # Act
+        provider = BigQueryProvider(
+            project=MOCK_PROJECT,
+            location=MOCK_LOCATION,
+            table_name=MOCK_TABLE_NAME,
+            min_online_days=MOCK_MIN_ONLINE_DAYS,
+            min_subgraphs=MOCK_MIN_SUBGRAPHS,
+            max_latency_ms=MOCK_MAX_LATENCY_MS,
+            max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
+            credentials=None,
+        )
+
+        # Assert
+        assert provider.credentials is None
 
 
 class TestInitialization:

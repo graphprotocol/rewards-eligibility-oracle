@@ -15,12 +15,12 @@ services:
       # Mount data directory to store data
       - ./data:/app/data
       - ./logs:/app/logs
-    
+
       # Mount config file as read-only
       - ./config.toml:/app/config.toml:ro
 
-      # Mount Google credentials file if using file-based auth (optional)
-      - ./credentials.json:/app/credentials.json:ro
+      # Mount service account key file for Google Cloud authentication
+      - ./keys/service-account.json:/app/keys/service-account.json:ro
 
     environment:
       - RUN_ON_STARTUP=true

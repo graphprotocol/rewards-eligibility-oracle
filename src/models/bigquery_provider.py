@@ -4,8 +4,9 @@ A provider for accessing Google BigQuery data for the Service Quality Oracle.
 
 import logging
 from datetime import date
-from typing import cast
+from typing import Optional, cast
 
+import google.auth.credentials
 from bigframes import pandas as bpd
 from pandera.typing import DataFrame
 
@@ -27,11 +28,35 @@ class BigQueryProvider:
         min_subgraphs: int,
         max_latency_ms: int,
         max_blocks_behind: int,
+        credentials: Optional[google.auth.credentials.Credentials] = None,
     ) -> None:
+        """
+        Initialize BigQuery provider with optional explicit credentials.
+
+        Params:
+            project: GCP project ID
+            location: BigQuery location (e.g., 'US')
+            table_name: Fully qualified table name
+            min_online_days: Minimum days online for eligibility
+            min_subgraphs: Minimum unique subgraphs served
+            max_latency_ms: Maximum acceptable latency
+            max_blocks_behind: Maximum blocks behind threshold
+            credentials: Optional Google Cloud credentials. If None, uses ADC.
+        """
         # Configure BigQuery connection globally for all SQL queries to BigQuery
         bpd.options.bigquery.location = location
         bpd.options.bigquery.project = project
         bpd.options.display.progress_bar = None
+
+        # Set credentials if provided (explicit dependency injection)
+        if credentials:
+            bpd.options.bigquery.credentials = credentials
+            logger.debug("Using explicit credentials for BigQuery")
+        else:
+            logger.debug("Using ADC for BigQuery")
+
+        # Store instance variables
+        self.credentials = credentials
         self.table_name = table_name
         self.min_online_days = min_online_days
         self.min_subgraphs = min_subgraphs

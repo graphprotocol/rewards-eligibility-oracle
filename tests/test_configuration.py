@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import google.auth.credentials
 import pytest
 
 from src.utils.configuration import (
@@ -737,6 +738,98 @@ class TestCredentialManager:
 
         # Assert
         assert "GOOGLE_APPLICATION_CREDENTIALS not set" in caplog.text
+
+
+class TestCredentialManagerFilePathAuth:
+    """Test credential loading using file paths and ADC (Application Default Credentials)"""
+
+
+    @pytest.fixture
+    def mock_google_auth_default(self):
+        """Mock google.auth.default for testing ADC pattern"""
+        with patch("google.auth.default") as mock_default:
+            mock_creds = MagicMock(spec=google.auth.credentials.Credentials)
+            mock_creds.valid = True
+            mock_creds.expired = False
+            mock_default.return_value = (mock_creds, "graph-mainnet")
+            yield mock_default
+
+
+    def test_get_google_credentials_uses_adc(self, mock_env, mock_google_auth_default):
+        """
+        GIVEN GOOGLE_APPLICATION_CREDENTIALS set to file path
+        WHEN get_google_credentials() called
+        THEN Uses google.auth.default() and returns credentials
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/app/keys/service-account.json")
+        manager = CredentialManager()
+
+        # Act
+        credentials = manager.get_google_credentials()
+
+        # Assert
+        mock_google_auth_default.assert_called_once_with(
+            scopes=[
+                "https://www.googleapis.com/auth/bigquery",
+                "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        )
+        assert credentials is not None
+        assert credentials.valid is True
+
+
+    def test_get_google_credentials_caches_result(self, mock_env, mock_google_auth_default):
+        """
+        GIVEN Credentials already loaded
+        WHEN get_google_credentials() called again
+        THEN Returns cached credentials without calling google.auth.default() again
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/app/keys/service-account.json")
+        manager = CredentialManager()
+
+        # Act
+        creds1 = manager.get_google_credentials()
+        creds2 = manager.get_google_credentials()
+
+        # Assert
+        assert creds1 is creds2
+        mock_google_auth_default.assert_called_once()
+
+
+    def test_get_google_credentials_fails_fast_when_auth_fails(self, mock_env):
+        """
+        GIVEN google.auth.default() raises exception
+        WHEN get_google_credentials() called
+        THEN Raises ValueError with descriptive message (Fail Fast)
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/file.json")
+        manager = CredentialManager()
+
+        with patch("google.auth.default", side_effect=Exception("Auth failed")):
+            # Act & Assert
+            with pytest.raises(ValueError, match="Failed to load Google Cloud credentials"):
+                manager.get_google_credentials()
+
+
+    def test_get_google_credentials_works_without_env_var(self, mock_env, mock_google_auth_default):
+        """
+        GIVEN No GOOGLE_APPLICATION_CREDENTIALS set (gcloud CLI)
+        WHEN get_google_credentials() called
+        THEN Falls back to ADC and succeeds
+        """
+        # Arrange
+        mock_env.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+        manager = CredentialManager()
+
+        # Act
+        credentials = manager.get_google_credentials()
+
+        # Assert
+        mock_google_auth_default.assert_called_once()
+        assert credentials is not None
 
 
 class TestLoadConfig:

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import google.auth
+import google.auth.credentials
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 
@@ -264,8 +265,6 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
         "MAX_AGE_BEFORE_DELETION",
         "BIGQUERY_ANALYSIS_PERIOD_DAYS",
         "PRIVATE_KEY",
-        "STUDIO_API_KEY",
-        "STUDIO_DEPLOY_KEY",
         "SLACK_WEBHOOK_URL",
         "ETHERSCAN_API_KEY",
         "ARBITRUM_API_KEY",
@@ -311,6 +310,66 @@ def validate_all_required_env_vars() -> None:
 
 class CredentialManager:
     """Handles credential management for Google Cloud services."""
+
+    def __init__(self):
+        """Initialize the credential manager"""
+        self._credentials_cache: Optional[google.auth.credentials.Credentials] = None
+
+
+    def get_google_credentials(self) -> google.auth.credentials.Credentials:
+        """
+        Get Google Cloud credentials using Application Default Credentials (ADC).
+
+        Supports multiple credential sources in order:
+        1. GOOGLE_APPLICATION_CREDENTIALS environment variable (file path)
+        2. gcloud CLI credentials
+        3. GCE metadata server (when running on Google Cloud)
+
+        Credentials are cached after first load for performance.
+
+        Returns:
+            google.auth.credentials.Credentials: Valid credentials object
+
+        Raises:
+            ValueError: If credentials cannot be loaded (Fail Fast)
+        """
+        # Return cached credentials if available
+        if self._credentials_cache is not None:
+            logger.debug("Using cached Google Cloud credentials")
+            return self._credentials_cache
+
+        # Load credentials using official Google ADC
+        try:
+            credentials, project = google.auth.default(
+                scopes=[
+                    "https://www.googleapis.com/auth/bigquery",
+                    "https://www.googleapis.com/auth/cloud-platform",
+                ]
+            )
+
+            # Cache credentials
+            self._credentials_cache = credentials
+
+            # Log credential details for verification
+            creds_source = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "ADC")
+            cred_type = type(credentials).__name__
+
+            # Show service account email if available (service accounts have this attribute)
+            if hasattr(credentials, 'service_account_email'):
+                logger.info(
+                    f"Loaded {cred_type} credentials from {creds_source} "
+                    f"for project {project} (service account: {credentials.service_account_email})"
+                )
+
+            else:
+                logger.info(f"Loaded {cred_type} credentials from {creds_source} for project {project}")
+
+            return credentials
+
+        except Exception as e:
+            error_msg = f"Failed to load Google Cloud credentials: {e}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
 
     def _parse_and_validate_credentials_json(self, creds_env: str) -> dict:

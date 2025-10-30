@@ -68,7 +68,7 @@ def main(run_date_override: date = None):
         else:
             logger.info("Slack notifications disabled (no webhook URL configured)")
 
-        credential_manager.setup_google_credentials()
+        credentials = credential_manager.get_google_credentials()
 
         # Define the date for the current run
         current_run_date = run_date_override or date.today()
@@ -116,6 +116,7 @@ def main(run_date_override: date = None):
                 min_subgraphs=config["MIN_SUBGRAPHS"],
                 max_latency_ms=config["MAX_LATENCY_MS"],
                 max_blocks_behind=config["MAX_BLOCKS_BEHIND"],
+                credentials=credentials,
             )
             eligibility_data = bigquery_provider.fetch_indexer_issuance_eligibility_data(start_date, end_date)
             logger.info(f"Successfully fetched data for {len(eligibility_data)} indexers from BigQuery.")

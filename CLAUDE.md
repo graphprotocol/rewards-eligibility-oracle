@@ -148,6 +148,34 @@ The system follows a clear data pipeline with daily scheduled execution:
 - Prefer rebasing and clean history over force pushing when possible
 - Always communicate with team before any history rewriting operations
 
+### Release Management
+
+This repository uses **release-please** for automated releases:
+
+**Commit Message Format (CRITICAL):**
+- Use conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`
+- release-please auto-generates CHANGELOG and handles versioning
+- Examples:
+  - `feat: add email notifications` (minor version bump)
+  - `fix: resolve timeout issue` (patch version bump)
+  - `feat!: change API structure` (major version bump)
+
+**DO NOT:**
+- Manually edit CHANGELOG.md for new changes (release-please updates it)
+- Manually create git tags (release-please creates them)
+- Manually create GitHub releases (release-please handles this)
+
+**Release Process:**
+1. Push commits with conventional format to `main`
+2. release-please creates/updates a Release PR automatically
+3. Review and merge the Release PR
+4. release-please creates tag and GitHub release
+5. CD workflow builds and publishes Docker images
+
+**Manual Hotfixes:** For urgent releases, use GitHub Actions → "CD - Build and Release" workflow
+
+See [docs/RELEASE_PROCESS.md](./docs/RELEASE_PROCESS.md) for full details.
+
 ### PR Requirements
 
 - Must pass `./scripts/ruff_check_format_assets.sh` without changes

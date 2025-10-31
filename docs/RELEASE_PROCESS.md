@@ -50,6 +50,7 @@ When commits are pushed to `main`, release-please:
 4. Creates/updates a "Release PR" with all changes
 
 **Example Release PR:**
+
 - Title: `chore(main): release 0.4.0`
 - Changes: Updated CHANGELOG.md, version bump
 - Body: Lists all changes since last release
@@ -63,6 +64,7 @@ To create a release:
 3. Merge the Release PR
 
 When merged, release-please automatically:
+
 - Creates a Git tag (e.g., `v0.4.0`)
 - Creates a GitHub Release with changelog
 - Triggers CD workflow to build and publish Docker images

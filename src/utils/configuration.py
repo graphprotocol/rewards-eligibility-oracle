@@ -355,7 +355,7 @@ class CredentialManager:
             cred_type = type(credentials).__name__
 
             # Show service account email if available (service accounts have this attribute)
-            if hasattr(credentials, 'service_account_email'):
+            if hasattr(credentials, "service_account_email"):
                 logger.info(
                     f"Loaded {cred_type} credentials from {creds_source} "
                     f"for project {project} (service account: {credentials.service_account_email})"

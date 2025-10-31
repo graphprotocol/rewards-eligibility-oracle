@@ -6,6 +6,7 @@ services:
     build: .
 
     # Set the container name
+    # File-based locking prevents multiple instances from running simultaneously
     container_name: service-quality-oracle
 
     # Set the image name

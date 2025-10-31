@@ -5,7 +5,7 @@ metadata:
   labels:
     app: service-quality-oracle
 spec:
-  replicas: 1  # Single instance due to state management
+  replicas: 1  # Can scale to 2+ for HA - file lock on PVC prevents concurrent runs
   selector:
     matchLabels:
       app: service-quality-oracle

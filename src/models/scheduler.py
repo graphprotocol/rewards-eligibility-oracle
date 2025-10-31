@@ -10,6 +10,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 import src.models.service_quality_oracle as oracle
 from src.utils.configuration import credential_manager, load_config, validate_all_required_env_vars
+from src.utils.lock_manager import LockManager
 from src.utils.slack_notifier import create_slack_notifier
 
 # Configure logging
@@ -27,8 +28,17 @@ HEALTHCHECK_FILE = "/app/healthcheck"
 
 class Scheduler:
 
-    def __init__(self):
+    def __init__(self, lock_manager=None):
+        """
+        Initialize Scheduler.
+
+        Params:
+            lock_manager: Optional LockManager instance for dependency injection.
+                         If None, creates a new LockManager instance.
+        """
         self.slack_notifier = None
+        self._injected_lock_manager = lock_manager
+        self.lock_manager = None
         self.config = self.initialize()
 
 
@@ -100,7 +110,7 @@ class Scheduler:
         """
         Function to run the Service Quality Oracle
 
-        Args:
+        Params:
             run_date_override: If provided, override the date for this run
         """
         run_date = run_date_override or datetime.now().date()
@@ -157,6 +167,17 @@ class Scheduler:
         """Initialize the scheduler and validate configuration"""
         logger.info("Initializing scheduler...")
         try:
+            # Acquire lock to prevent multiple instances
+            try:
+                # Use injected lock manager or create new one (dependency injection)
+                self.lock_manager = self._injected_lock_manager or LockManager()
+                self.lock_manager.__enter__()
+                logger.info("Instance lock acquired successfully")
+
+            except Exception:
+                logger.error("Failed to acquire lock. Another instance may be running.", exc_info=True)
+                sys.exit(1)
+
             validate_all_required_env_vars()
 
             # Validate credentials early (Fail Fast)
@@ -241,6 +262,14 @@ class Scheduler:
                     error_message=str(e), stage="Scheduler Runtime", execution_time=0
                 )
             sys.exit(1)
+
+        finally:
+            # Release lock on exit
+            if self.lock_manager:
+                try:
+                    self.lock_manager.__exit__(None, None, None)
+                except Exception as e:
+                    logger.error(f"Error releasing lock during shutdown: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

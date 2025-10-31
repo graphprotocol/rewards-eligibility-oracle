@@ -49,6 +49,7 @@ def mock_dependencies():
         patch("src.models.scheduler.logger") as mock_logger,
         patch("src.models.scheduler.time") as mock_time,
         patch("src.models.scheduler.datetime") as mock_datetime,
+        patch("src.models.scheduler.LockManager") as mock_lock_manager_class,
     ):
         mock_os.environ.get.return_value = "false"
         mock_slack_notifier = MagicMock()
@@ -58,6 +59,12 @@ def mock_dependencies():
         mock_datetime.now.return_value = datetime(2023, 10, 27)
         # Allow strptime to pass through to the real implementation
         mock_datetime.strptime = datetime.strptime
+
+        # Mock lock manager instance and configure context manager behavior
+        mock_lock_manager_instance = MagicMock()
+        mock_lock_manager_instance.__enter__ = MagicMock(return_value=mock_lock_manager_instance)
+        mock_lock_manager_instance.__exit__ = MagicMock(return_value=False)
+        mock_lock_manager_class.return_value = mock_lock_manager_instance
 
         yield SimpleNamespace(
             validate=mock_validate,
@@ -73,6 +80,8 @@ def mock_dependencies():
             logger=mock_logger,
             time=mock_time,
             datetime=mock_datetime,
+            lock_manager_class=mock_lock_manager_class,
+            lock_manager=mock_lock_manager_instance,
         )
 
 
@@ -84,6 +93,7 @@ def scheduler(mock_dependencies: SimpleNamespace) -> Scheduler:
         sch.config = MOCK_CONFIG
         sch.slack_notifier = mock_dependencies.slack_notifier
         sch.logger = mock_dependencies.logger
+        sch.lock_manager = None
         yield sch
 
 
@@ -369,6 +379,84 @@ class TestSchedulerTasks:
             scheduler.run_oracle()
 
         assert mock_dependencies.oracle.main.call_count == expected_attempts
+
+
+class TestSchedulerLocking:
+    """Tests for instance locking mechanism that prevents multiple schedulers from running."""
+
+
+    def test_scheduler_acquires_lock_on_init(self, mock_dependencies: SimpleNamespace):
+        """Test that scheduler acquires lock during initialization"""
+        # Arrange
+        with patch.object(Scheduler, "check_missed_runs"):
+            
+            # Act
+            Scheduler()
+
+            # Assert
+            mock_dependencies.lock_manager_class.assert_called_once()
+            mock_dependencies.lock_manager.__enter__.assert_called_once()
+
+
+    def test_scheduler_exits_with_code_1_when_lock_unavailable(self, mock_dependencies: SimpleNamespace):
+        """Test that scheduler exits with code 1 when lock is held by another instance"""
+        # Arrange
+        lock_exception = BlockingIOError("Another instance is running")
+        mock_dependencies.lock_manager.__enter__.side_effect = lock_exception
+
+        # Act
+        Scheduler()
+
+        # Assert
+        mock_dependencies.logger.error.assert_any_call(
+            "Failed to acquire lock. Another instance may be running.", exc_info=True
+        )
+        mock_dependencies.exit.assert_called_once_with(1)
+
+
+    def test_scheduler_releases_lock_on_keyboard_interrupt(
+        self, scheduler: Scheduler, mock_dependencies: SimpleNamespace
+    ):
+        """Test that lock is released when scheduler is stopped via KeyboardInterrupt"""
+        # Arrange
+        mock_dependencies.schedule.run_pending.side_effect = KeyboardInterrupt("Test interrupt")
+        scheduler.lock_manager = mock_dependencies.lock_manager
+
+        # Act
+        scheduler.run()
+
+        # Assert
+        mock_dependencies.lock_manager.__exit__.assert_called()
+
+
+    def test_scheduler_releases_lock_on_exception(self, scheduler: Scheduler, mock_dependencies: SimpleNamespace):
+        """Test that lock is released when scheduler crashes with exception"""
+        # Arrange
+        test_exception = Exception("Critical failure")
+        mock_dependencies.schedule.run_pending.side_effect = test_exception
+        scheduler.lock_manager = mock_dependencies.lock_manager
+
+        # Act
+        scheduler.run()
+
+        # Assert
+        mock_dependencies.lock_manager.__exit__.assert_called()
+
+
+    def test_scheduler_accepts_injected_lock_manager(self, mock_dependencies: SimpleNamespace):
+        """Test that custom LockManager can be injected via dependency injection"""
+        # Arrange
+        custom_lock_manager = MagicMock()
+        custom_lock_manager.__enter__ = MagicMock(return_value=custom_lock_manager)
+        custom_lock_manager.__exit__ = MagicMock(return_value=False)
+
+        # Act
+        with patch.object(Scheduler, "check_missed_runs"):
+            scheduler = Scheduler(lock_manager=custom_lock_manager)
+
+        # Assert
+        custom_lock_manager.__enter__.assert_called_once()
+        assert scheduler.lock_manager == custom_lock_manager
 
 
 class TestSchedulerRunLoop:

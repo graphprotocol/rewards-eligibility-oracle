@@ -5,6 +5,18 @@ All notable changes to the Service Quality Oracle project will be documented in 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.3.0...v0.4.0) (2025-11-03)
+
+
+### Features
+
+* add release-please automation ([#45](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/45)) ([4c49ba5](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/4c49ba5a86bc019c7e08ca694892d20359247aee))
+
+
+### Bug Fixes
+
+* **ci:** update Python to 3.13.7 and limit workflow permissions ([#43](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/43)) ([cc8cac6](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/cc8cac6621e3dadfc0509dcbd3ea152970fea70c))
+
 ## [Unreleased]
 
 ### Changed

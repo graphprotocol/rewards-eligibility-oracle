@@ -23,6 +23,7 @@ nano k8s/secrets.yaml
 ```
 
 **Required secrets:**
+
 - **`google-credentials`**: Service account JSON for BigQuery access
 - **`blockchain-private-key`**: Private key for Arbitrum Sepolia transactions  
 - **`arbitrum-api-key`**: API key for Arbiscan contract verification
@@ -39,6 +40,7 @@ kubectl get storageclass
 ```
 
 **Common storage classes by platform:**
+
 - **AWS EKS**: `gp2`, `gp3`, `ebs-csi`
 - **Google GKE**: `standard`, `ssd`  
 - **Azure AKS**: `managed-premium`, `managed`
@@ -78,6 +80,7 @@ The service uses **two persistent volumes** to maintain state across pod restart
 - **`service-quality-oracle-logs` (2GB)**: Application logs
 
 **Mount points:**
+
 - `/app/data` → Critical state files (circuit breaker, cache, outputs)
 - `/app/logs` → Application logs
 
@@ -87,6 +90,7 @@ The service uses **two persistent volumes** to maintain state across pod restart
 **Sensitive credentials** → `Secret` (`secrets.yaml`)
 
 This separation provides:
+
 - ✅ Easy configuration updates without rebuilding images
 - ✅ Secure credential management with base64 encoding
 - ✅ Clear separation of concerns
@@ -94,10 +98,12 @@ This separation provides:
 ### Resource Allocation
 
 **Requests (guaranteed):**
+
 - CPU: 250m (0.25 cores)
 - Memory: 512M
 
 **Limits (maximum):**
+
 - CPU: 1000m (1.0 core)  
 - Memory: 1G
 

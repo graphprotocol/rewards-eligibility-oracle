@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: service-quality-oracle
-        image: ghcr.io/graphprotocol/service-quality-oracle:latest
+        image: ghcr.io/graphprotocol/service-quality-oracle:v0.4.0
         envFrom:
         # Load all non-sensitive configuration from ConfigMap
         - configMapRef:

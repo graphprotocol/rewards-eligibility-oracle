@@ -1,12 +1,12 @@
-# Service Quality Oracle - Kubernetes Deployment
+# Rewards Eligibility Oracle - Kubernetes Deployment
 
-This directory contains Kubernetes manifests for deploying the Service Quality Oracle with persistent state management.
+This directory contains Kubernetes manifests for deploying the Rewards Eligibility Oracle with persistent state management.
 
 ## Prerequisites
 
 - Kubernetes cluster (version 1.19+)
 - `kubectl` configured to access your cluster
-- Docker image published to `ghcr.io/graphprotocol/service-quality-oracle`
+- Docker image published to `ghcr.io/graphprotocol/rewards-eligibility-oracle`
 - **Storage class configured** (see Storage Configuration below)
 
 ## Quick Start
@@ -53,18 +53,18 @@ kubectl get storageclass
 kubectl apply -f k8s/
 
 # Verify deployment
-kubectl get pods -l app=service-quality-oracle
-kubectl get pvc -l app=service-quality-oracle
+kubectl get pods -l app=rewards-eligibility-oracle
+kubectl get pvc -l app=rewards-eligibility-oracle
 ```
 
 ### 4. Monitor Deployment
 
 ```bash
 # Check pod status
-kubectl describe pod -l app=service-quality-oracle
+kubectl describe pod -l app=rewards-eligibility-oracle
 
 # View logs
-kubectl logs -l app=service-quality-oracle -f
+kubectl logs -l app=rewards-eligibility-oracle -f
 
 # Check persistent volumes
 kubectl get pv
@@ -76,8 +76,8 @@ kubectl get pv
 
 The service uses **two persistent volumes** to maintain state across pod restarts:
 
-- **`service-quality-oracle-data` (5GB)**: Circuit breaker state, last run tracking, BigQuery cache, CSV outputs
-- **`service-quality-oracle-logs` (2GB)**: Application logs
+- **`rewards-eligibility-oracle-data` (5GB)**: Circuit breaker state, last run tracking, BigQuery cache, CSV outputs
+- **`rewards-eligibility-oracle-logs` (2GB)**: Application logs
 
 **Mount points:**
 
@@ -129,7 +129,7 @@ The deployment uses **file-based health checks** (same as docker-compose):
 
 ```bash
 # Check events
-kubectl describe pod -l app=service-quality-oracle
+kubectl describe pod -l app=rewards-eligibility-oracle
 
 # Common issues:
 # - Missing secrets
@@ -144,17 +144,17 @@ kubectl describe pod -l app=service-quality-oracle
 kubectl get pvc
 
 # Check if volumes are mounted correctly
-kubectl exec -it deployment/service-quality-oracle -- ls -la /app/data
+kubectl exec -it deployment/rewards-eligibility-oracle -- ls -la /app/data
 ```
 
 ### Debug Configuration
 
 ```bash
 # Check environment variables
-kubectl exec -it deployment/service-quality-oracle -- env | grep -E "(BIGQUERY|BLOCKCHAIN)"
+kubectl exec -it deployment/rewards-eligibility-oracle -- env | grep -E "(BIGQUERY|BLOCKCHAIN)"
 
 # Verify secrets are mounted
-kubectl exec -it deployment/service-quality-oracle -- ls -la /etc/secrets
+kubectl exec -it deployment/rewards-eligibility-oracle -- ls -la /etc/secrets
 ```
 
 ## Security Best Practices

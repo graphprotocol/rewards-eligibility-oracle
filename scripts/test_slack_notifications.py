@@ -153,7 +153,7 @@ def run_all_tests() -> bool:
 
 def main():
     """Main entry point for the Slack notification test script."""
-    logger.info("===== Service Quality Oracle - Slack Notification Test Script =====")
+    logger.info("===== Rewards Eligibility Oracle - Slack Notification Test Script =====")
 
     if run_all_tests():
         logger.info("All tests completed successfully!")

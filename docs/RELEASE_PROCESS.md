@@ -75,8 +75,8 @@ The CD workflow triggers automatically on tag creation:
 
 1. Builds multi-architecture Docker images (amd64/arm64)
 2. Publishes to GitHub Container Registry:
-   - `ghcr.io/graphprotocol/service-quality-oracle:v0.4.0`
-   - `ghcr.io/graphprotocol/service-quality-oracle:latest`
+   - `ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.4.0`
+   - `ghcr.io/graphprotocol/rewards-eligibility-oracle:latest`
 
 ## Commit Type Reference
 

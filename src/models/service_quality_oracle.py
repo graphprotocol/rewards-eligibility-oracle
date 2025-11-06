@@ -1,5 +1,5 @@
 """
-Service Quality Oracle's core module for fetching & processing data.
+Rewards Eligibility Oracle's core module for fetching & processing data.
 This module serves as the entry point for the oracle functionality, responsible for:
 1. Fetching eligibility data from BigQuery
 2. Processing indexer data to determine eligibility
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 def main(run_date_override: date = None):
     """
-    Main entry point for the Service Quality Oracle.
+    Main entry point for the Rewards Eligibility Oracle.
     This function:
     1. Sets up Google credentials (if not already set up by scheduler)
     2. Fetches and processes indexer eligibility data

@@ -1,6 +1,6 @@
 # Continuous Deployment (CD) Process
 
-This document explains the CD process for the Service Quality Oracle project.
+This document explains the CD process for the Rewards Eligibility Oracle project.
 
 ## Overview
 
@@ -68,10 +68,10 @@ Images are published to GitHub Container Registry:
 
 ```bash
 # Pull specific version
-docker pull ghcr.io/graphprotocol/service-quality-oracle:v0.1.0
+docker pull ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.1.0
 
 # Pull latest
-docker pull ghcr.io/graphprotocol/service-quality-oracle:latest
+docker pull ghcr.io/graphprotocol/rewards-eligibility-oracle:latest
 ```
 
 ## Release Strategy Examples
@@ -105,7 +105,7 @@ Critical bug found → PR merged → Trigger CD (patch) → v0.1.1
 The GitHub Container Registry (ghcr.io) is automatically available. Images will be published to:
 
 ```
-ghcr.io/graphprotocol/service-quality-oracle
+ghcr.io/graphprotocol/rewards-eligibility-oracle
 ```
 
 ### 2. Update docker-compose.yml
@@ -114,8 +114,8 @@ After your first release, update your `docker-compose.yml`:
 
 ```yaml
 services:
-  service-quality-oracle:
-    image: ghcr.io/graphprotocol/service-quality-oracle:v0.1.0
+  rewards-eligibility-oracle:
+    image: ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.1.0
     # or use :latest for auto-updates
 ```
 
@@ -133,10 +133,10 @@ To rollback to a previous version:
 
 ```bash
 # List available versions
-docker images ghcr.io/graphprotocol/service-quality-oracle
+docker images ghcr.io/graphprotocol/rewards-eligibility-oracle
 
 # Pull and run specific version
-docker pull ghcr.io/graphprotocol/service-quality-oracle:v0.0.9
+docker pull ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.0.9
 docker-compose up -d
 ```
 

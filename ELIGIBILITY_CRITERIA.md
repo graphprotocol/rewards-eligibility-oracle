@@ -6,7 +6,7 @@ This document defines the requirements an Indexer must meet to be eligible for i
 
 ## Upcoming Eligibility Criteria
 
-**We will announce changes to the eligibility criteria in the table below.** Once the change goes live, it will be reflected in the [Active Eligibility Criteria](https://github.com/graphprotocol/service-quality-oracle/blob/main/ELIGIBILITY_CRITERIA.md#active-eligibility-criteria) section of this document.
+**We will announce changes to the eligibility criteria in the table below.** Once the change goes live, it will be reflected in the [Active Eligibility Criteria](https://github.com/graphprotocol/rewards-eligibility-oracle/blob/main/ELIGIBILITY_CRITERIA.md#active-eligibility-criteria) section of this document.
 
 | Upcoming Requirement | Justification | Date Requirement Will Be Updated/Introduced (YYYY-MM-DD) |
 |----------------------|---------------|----------------------------------------------------------|

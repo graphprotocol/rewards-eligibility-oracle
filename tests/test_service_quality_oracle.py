@@ -1,5 +1,5 @@
 """
-Unit tests for the main ServiceQualityOracle orchestrator.
+Unit tests for the main RewardsEligibilityOracle orchestrator.
 """
 
 import importlib
@@ -54,7 +54,7 @@ def oracle_context():
         patch("src.models.eligibility_pipeline.EligibilityPipeline") as mock_pipeline_cls,
         patch("src.models.blockchain_client.BlockchainClient") as mock_client_cls,
         patch("src.utils.circuit_breaker.CircuitBreaker") as mock_circuit_breaker_cls,
-        patch("src.models.service_quality_oracle.Path") as mock_path_cls,
+        patch("src.models.rewards_eligibility_oracle.Path") as mock_path_cls,
         patch("logging.Logger.error") as mock_logger_error,
     ):
         # Configure mock Path to return a consistent root path object
@@ -92,14 +92,14 @@ def oracle_context():
         mock_get_creds.return_value = mock_credentials
 
         # Reload module so that patched objects are used inside it
-        if "src.models.service_quality_oracle" in sys.modules:
-            del sys.modules["src.models.service_quality_oracle"]
-        import src.models.service_quality_oracle as sqo
+        if "src.models.rewards_eligibility_oracle" in sys.modules:
+            del sys.modules["src.models.rewards_eligibility_oracle"]
+        import src.models.rewards_eligibility_oracle as reo
 
-        importlib.reload(sqo)
+        importlib.reload(reo)
 
         yield {
-            "main": sqo.main,
+            "main": reo.main,
             "get_creds": mock_get_creds,
             "load_config": mock_load_config,
             "slack": {"create": mock_create_slack, "notifier": mock_slack_notifier},

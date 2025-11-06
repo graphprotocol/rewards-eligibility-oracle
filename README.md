@@ -7,6 +7,7 @@ This repository implements a Docker container service for the Rewards Eligibilit
 ### Key Features
 
 The oracle runs with the following functionality:
+
 - **BigQuery Integration**: Fetches indexer performance data from Google BigQuery
 - **Eligibility Processing**: Applies threshold algorithm to determine rewards eligibility based on service quality
 - **Blockchain Integration**: Posts rewards eligibility updates to the RewardsEligibilityOracle contract
@@ -21,23 +22,12 @@ The oracle includes built-in Slack notifications for operational monitoring:
 
 - **Success Notifications**: Sent when oracle runs complete successfully, including transaction details
 - **Failure Notifications**: Sent when errors occur, with detailed error information for debugging
-- **Simple & Reliable**: Direct notifications from the oracle process itself
 
 For production deployments, container orchestration (Kubernetes) should handle:
+
 - Container health monitoring and restarts
 - Resource management and scaling
 - Infrastructure-level alerts and monitoring
-
-### Testing Notifications
-
-Test notification functionality:
-```bash
-# Set webhook URL
-export SLACK_WEBHOOK_URL="your_webhook_url"
-
-# Run notification tests
-./scripts/test_slack_notifications.py
-```
 
 ## Configuration
 
@@ -71,73 +61,37 @@ Automated quality checks and security scanning via GitHub Actions. Run `./script
 
 For details: [.github/README.md](./.github/README.md)
 
-## Getting Started
-
-### Quick Start with Docker
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/graphprotocol/service-quality-oracle.git
-   cd service-quality-oracle
-   ```
-
-2. **Set up environment variables/config.toml**:
-
-3. **Build and run with Docker Compose**:
-   ```bash
-   docker-compose up --build -d
-   ```
-
-4. **Monitor logs**:
-   ```bash
-   docker-compose logs -f
-   ```
-
-5. **Check health status**:
-   ```bash
-   docker-compose ps
-   ```
-
 ### Development Workflow
 
 For contributors working on the codebase:
 
 **Before pushing:**
-   ```bash
-   # Setup venv
-   python3 -m venv venv
-   source venv/bin/activate
 
-   # Install requirements
-   pip install -r requirements.txt
+```bash
+# Setup venv
+python3 -m venv venv
+source venv/bin/activate
 
-   # Use the custom ruff script for linting (includes SQL formatting and aggressive linting)
-   ./scripts/ruff_check_format_assets.sh
-   ```
+# Install requirements
+pip install -r requirements.txt
+
+# Use the custom ruff script for linting (includes SQL formatting and aggressive linting)
+./scripts/ruff_check_format_assets.sh
+
+# Use markdownlint to lint and fix markdown files
+markdownlint '**/*.md' --ignore 'venv/**' --ignore 'node_modules/**' --fix
+```
 
 **Optional checks:**
+
 ```bash
 mypy src/ --ignore-missing-imports
 bandit -r src/
 ```
 
-> **Note:** The CI/CD pipeline uses the custom `ruff_check_format_assets.sh` script which includes SQL whitespace fixes and more aggressive formatting than standard ruff. 
-> 
+> **Note:** The CI/CD pipeline uses the custom `ruff_check_format_assets.sh` script which includes SQL whitespace fixes and more aggressive formatting than standard ruff.
 > Always run this script locally before pushing to avoid CI failures.
 
 ## License
 
 [License information to be determined.]
-
-## TODO List (only outstanding TODOs)
-
-### 1. Testing
-- [ ] Security review of code and dependencies
-
-### 2. Documentation
-- [ ] Documentation of all major components
-- [ ] Document operational procedures
-
-### 3. Optimization
-- [ ] Optimize dependencies and container setup
-- [ ] Ensure unused files, functions & dependencies are removed from codebase

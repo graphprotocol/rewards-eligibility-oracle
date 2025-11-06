@@ -1,6 +1,6 @@
 # Technical Design & Architecture
 
-This document outlines key architectural decisions and data flows within the Service Quality Oracle.
+This document outlines key architectural decisions and data flows within the Rewards Eligibility Oracle.
 
 ## RPC Provider Failover and Circuit Breaker Logic
 
@@ -11,7 +11,7 @@ The following diagram illustrates the sequence of events when all RPC providers 
 ```mermaid
 sequenceDiagram
     # Setup column titles
-    participant main_oracle as service_quality_oracle.py
+    participant main_oracle as rewards_eligibility_oracle.py
     participant blockchain_client as blockchain_client.py
     participant circuit_breaker as circuit_breaker.py
     participant slack_notifier as slack_notifier.py

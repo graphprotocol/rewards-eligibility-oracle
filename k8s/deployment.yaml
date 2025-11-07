@@ -1,62 +1,62 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: service-quality-oracle
+  name: rewards-eligibility-oracle
   labels:
-    app: service-quality-oracle
+    app: rewards-eligibility-oracle
 spec:
   replicas: 1  # Single instance due to state management
   selector:
     matchLabels:
-      app: service-quality-oracle
+      app: rewards-eligibility-oracle
   template:
     metadata:
       labels:
-        app: service-quality-oracle
+        app: rewards-eligibility-oracle
     spec:
       containers:
-      - name: service-quality-oracle
-        image: ghcr.io/graphprotocol/service-quality-oracle:v0.4.1 # x-release-please-version
+      - name: rewards-eligibility-oracle
+        image: ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.4.0
         envFrom:
         # Load all non-sensitive configuration from ConfigMap
         - configMapRef:
-            name: service-quality-oracle-config
+            name: rewards-eligibility-oracle-config
         env:
         # Secrets from Kubernetes Secret
         - name: GOOGLE_APPLICATION_CREDENTIALS
           valueFrom:
             secretKeyRef:
-              name: service-quality-oracle-secrets
+              name: rewards-eligibility-oracle-secrets
               key: google-credentials
         - name: BLOCKCHAIN_PRIVATE_KEY
           valueFrom:
             secretKeyRef:
-              name: service-quality-oracle-secrets
+              name: rewards-eligibility-oracle-secrets
               key: blockchain-private-key
         - name: ETHERSCAN_API_KEY
           valueFrom:
             secretKeyRef:
-              name: service-quality-oracle-secrets
+              name: rewards-eligibility-oracle-secrets
               key: etherscan-api-key
         - name: ARBITRUM_API_KEY
           valueFrom:
             secretKeyRef:
-              name: service-quality-oracle-secrets
+              name: rewards-eligibility-oracle-secrets
               key: arbitrum-api-key
         - name: STUDIO_API_KEY
           valueFrom:
             secretKeyRef:
-              name: service-quality-oracle-secrets
+              name: rewards-eligibility-oracle-secrets
               key: studio-api-key
         - name: STUDIO_DEPLOY_KEY
           valueFrom:
             secretKeyRef:
-              name: service-quality-oracle-secrets
+              name: rewards-eligibility-oracle-secrets
               key: studio-deploy-key
         - name: SLACK_WEBHOOK_URL
           valueFrom:
             secretKeyRef:
-              name: service-quality-oracle-secrets
+              name: rewards-eligibility-oracle-secrets
               key: slack-webhook-url
         volumeMounts:
         - name: data-volume
@@ -92,8 +92,8 @@ spec:
       volumes:
       - name: data-volume
         persistentVolumeClaim:
-          claimName: service-quality-oracle-data
+          claimName: rewards-eligibility-oracle-data
       - name: logs-volume
         persistentVolumeClaim:
-          claimName: service-quality-oracle-logs
+          claimName: rewards-eligibility-oracle-logs
       restartPolicy: Always

@@ -8,7 +8,7 @@ import pytz
 import schedule
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-import src.models.service_quality_oracle as oracle
+import src.models.rewards_eligibility_oracle as oracle
 from src.utils.configuration import credential_manager, load_config, validate_all_required_env_vars
 from src.utils.slack_notifier import create_slack_notifier
 
@@ -98,14 +98,14 @@ class Scheduler:
     )
     def run_oracle(self, run_date_override=None):
         """
-        Function to run the Service Quality Oracle
+        Function to run the Rewards Eligibility Oracle
 
         Args:
             run_date_override: If provided, override the date for this run
         """
         run_date = run_date_override or datetime.now().date()
         start_time = datetime.now()
-        logger.info(f"Starting Service Quality Oracle run at {start_time} for date {run_date}")
+        logger.info(f"Starting Rewards Eligibility Oracle run at {start_time} for date {run_date}")
 
         # The oracle.main() function handles its own exceptions, notifications, and credential setup.
         # The scheduler's role is simply to trigger it and handle the retry logic.
@@ -176,7 +176,7 @@ class Scheduler:
             if self.slack_notifier:
                 logger.info("Slack notifications enabled for scheduler")
                 startup_message = (
-                    f"Service Quality Oracle scheduler started successfully.\n"
+                    f"Rewards Eligibility Oracle scheduler started successfully.\n"
                     f"**Scheduled time:** {config['SCHEDULED_RUN_TIME']} UTC\n"
                     f"**Environment:** {os.environ.get('ENVIRONMENT', 'unknown')}"
                 )

@@ -1,5 +1,5 @@
 """
-Eligibility pipeline module for the Service Quality Oracle.
+Eligibility pipeline module for the Rewards Eligibility Oracle.
 
 This module contains the logic for processing raw BigQuery data into a list of eligible indexers. It handles:
 - Parsing and filtering of indexer performance data.

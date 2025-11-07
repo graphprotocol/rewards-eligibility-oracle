@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Service Quality Oracle is a Python-based Docker containerized service that:
+Rewards Eligibility Oracle is a Python-based Docker containerized service that:
 
 - Fetches indexer performance data from Google BigQuery daily at 10:00 UTC
 - Processes data to determine indexer issuance rewards eligibility based on threshold algorithms
@@ -79,7 +79,7 @@ The system follows a clear data pipeline with daily scheduled execution:
 
 1. **Scheduler (src/models/scheduler.py)**: Main entry point that runs daily at configured time, manages catch-up runs for missed days, and handles the application lifecycle.
 
-2. **Orchestrator (src/models/service_quality_oracle.py)**: Coordinates the end-to-end oracle run process by managing the flow between components.
+2. **Orchestrator (src/models/rewards_eligibility_oracle.py)**: Coordinates the end-to-end oracle run process by managing the flow between components.
 
 3. **BigQuery Provider (src/models/bigquery_provider.py)**: Executes SQL queries against BigQuery to fetch indexer performance metrics.
 

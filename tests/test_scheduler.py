@@ -24,12 +24,12 @@ MOCK_CONFIG_NO_SLACK = {"SCHEDULED_RUN_TIME": "10:00", "SLACK_WEBHOOK_URL": None
 @pytest.fixture(autouse=True)
 def mock_oracle_module():
     """
-    Fixture to mock the entire service_quality_oracle module.
+    Fixture to mock the entire rewards_eligibility_oracle module.
     This prevents the real module from being loaded during scheduler tests,
     isolating them and preventing side effects. `autouse=True` ensures it runs
     for every test in this file.
     """
-    with patch.dict(sys.modules, {"src.models.service_quality_oracle": MagicMock()}):
+    with patch.dict(sys.modules, {"src.models.rewards_eligibility_oracle": MagicMock()}):
         yield
 
 

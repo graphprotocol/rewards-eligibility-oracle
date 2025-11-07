@@ -181,7 +181,7 @@ jobs:
             echo "Or use docker-compose:"
             echo '```yaml'
             echo "services:"
-            echo "  service-quality-oracle:"
+            echo "  rewards-eligibility-oracle:"
             echo "    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}"
             echo '```'
           } > release_notes.md

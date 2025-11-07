@@ -95,7 +95,7 @@ def test_send_success_notification_builds_correct_payload(mock_requests: MagicMo
     payload = call_kwargs["json"]
     attachment = payload["attachments"][0]
 
-    assert payload["text"] == "Service Quality Oracle - Success"
+    assert payload["text"] == "Rewards Eligibility Oracle - Success"
     assert attachment["color"] == "good"
 
     # Create a map of title to value for easier assertions
@@ -115,7 +115,7 @@ def test_send_failure_notification_builds_correct_payload(mock_requests: MagicMo
     payload = call_kwargs["json"]
     attachment = payload["attachments"][0]
 
-    assert payload["text"] == "Service Quality Oracle - FAILURE"
+    assert payload["text"] == "Rewards Eligibility Oracle - FAILURE"
     assert attachment["color"] == "danger"
     fields = {field["title"]: field["value"] for field in attachment["fields"]}
     assert fields["Status"] == "Failed"
@@ -132,7 +132,7 @@ def test_send_info_notification_builds_correct_payload(mock_requests: MagicMock)
     payload = call_kwargs["json"]
     attachment = payload["attachments"][0]
 
-    assert payload["text"] == "Service Quality Oracle - Friendly Reminder"
+    assert payload["text"] == "Rewards Eligibility Oracle - Friendly Reminder"
     assert attachment["color"] == "good"  # Default color
     fields = {field["title"]: field["value"] for field in attachment["fields"]}
     assert fields["Message"] == "Just an FYI"

@@ -1,12 +1,12 @@
 services:
-  # Service Quality Oracle container
-  service-quality-oracle:
+  # Rewards Eligibility Oracle container
+  rewards-eligibility-oracle:
 
     # Build the image from the Dockerfile in the current directory
     build: .
 
     # Set the container name
-    container_name: service-quality-oracle
+    container_name: rewards-eligibility-oracle
 
     # Set the image name
     image: ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.4.1 # x-release-please-version

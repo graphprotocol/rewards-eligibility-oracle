@@ -25,7 +25,7 @@ graph TB
             CBCheck{"Has there been more<br/>than 3 failures in the <br/>last 60 minutes?"}
         end
 
-        Scheduler -.->|"Triggers"| Oracle
+        Scheduler -.->|"Phase 1: Schedule daily run"| Oracle
 
         %% Data Pipeline
         subgraph PIPELINE["Data Pipeline"]
@@ -49,9 +49,7 @@ graph TB
 
             subgraph RPC["RPC Failover System"]
                 TryRPC["Try establish connection<br/>with RPC provider"]
-                RPCError["RPC Error Detected"]
-                RPCFail{"All Providers<br/>Failed?"}
-                Rotate["Rotate & Notify"]
+                RPCError["Rotate to next RPC provider"]
             end
 
             BuildTx["Build Transaction:<br/>- Estimate gas<br/>- Get nonce<br/>- Sign with key"]
@@ -63,8 +61,9 @@ graph TB
         %% Monitoring
         subgraph MONITOR["Monitoring & Notifications"]
             SlackSuccess["Slack Success:<br/>- Eligible count<br/>- Execution time<br/>- Transaction links"]
-            SlackFail["Stop container sys.exit(0)<br/>Container will not restart<br/>Manual Intervention needed<br/>Send notification to team<br/>slack channel for debugging"]
-            SlackRotate["Slack Info:<br/>RPC rotation"]
+            SlackFailCircuitBreaker["Stop container sys.exit(0)<br/>Container will not restart<br/>Manual Intervention needed<br/>Send notification to team<br/>slack channel for debugging"]
+            SlackFailRPC["Stop container sys.exit(1)<br/>Container will restart automatically<br/>Send notification to team<br/>slack channel for debugging"]
+            SlackRotate["Send slack notification"]
         end
     end
 
@@ -80,7 +79,8 @@ graph TB
         HistoricalData["Historical archive of<br/>eligible and ineligible<br/>indexers by date<br/>YYYY-MM-DD"]
     end
 
-    END["FAILURE<br/>Container Stopped<br/>No Restart<br/>Team will investigate"]
+    END_NO_RESTART["FAILURE<br/>Container Stopped<br/>No Restart (sys.exit 0)<br/>Manual Intervention Required"]
+    END_WITH_RESTART["FAILURE<br/>Container Stopped<br/>Docker Restarts Container (sys.exit 1)<br/>Will retry through circuit breaker"]
     SUCCESS["SUCCESS<br/>Wait for next<br/>scheduled trigger"]
 
     %% Main Flow - Start with Docker container to anchor it left
@@ -91,8 +91,8 @@ graph TB
     CBCheck -->|"Phase 2:<br/>(Regular Path)<br/>No"| CacheCheck
     CacheCheck -->|"Phase 2.1: Check for<br/>recent cached data"| HistoricalData
     HistoricalData -->|"Phase 2.2: Return recent eligible indexers<br/>from eligible_indexers.csv<br/>(if they exist)"| CacheCheck
-    CBCheck -.->|"Phase 2:<br/>(Alternative Path)<br/>Yes"| SlackFail
-    SlackFail -.-> END
+    CBCheck -.->|"Phase 2:<br/>(Alternative Path)<br/>Yes"| SlackFailCircuitBreaker
+    SlackFailCircuitBreaker -.-> END_NO_RESTART
 
     CacheCheck -->|"Phase 3:<br/>(Alternative Path)<br/>Yes"| Batch
     CacheCheck -->|"Phase 3:<br/>(Regular Path)<br/>No"| FetchData
@@ -108,11 +108,11 @@ graph TB
     Batch -->|"Phase 4.1: For each batch"| TryRPC
     TryRPC -->|"Phase 4.2: Connect"| RPCProviders
     RPCProviders -->|"Phase 4.3:<br/>(Regular Path)<br/>RPC connection established"| BuildTx
-    RPCProviders -.->|"Phase 4.3:<br/>(Alternative Path)<br/>RPC connection failed"| RPCError
-    RPCError -->|"Rotate to next<br/>provider in pool"| Rotate
-    Rotate -.->|"Notify"| SlackRotate
-    Rotate -->|"All exhausted"| RPCFail
-    RPCFail -->|"Yes<br/>Record failure timestamp<br/>sys.exit(1) triggers Docker restart"| SlackFail
+    RPCProviders -.->|"Phase 4.3:<br/>(Alternative Path)<br/>RPC connection failed<br/>Multiple connection attempts<br/>Not possible to connect"| RPCError
+    RPCError -.->|"Notify"| SlackRotate
+    RPCError -->|"All exhausted"| SlackFailRPC
+    SlackFailRPC --> END_WITH_RESTART
+    RPCError -->|"Connection successful"| BuildTx
 
     BuildTx --> SubmitTx
     SubmitTx --> WaitReceipt
@@ -134,6 +134,7 @@ graph TB
     classDef contractStyle fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#1e3a8a
     classDef decisionStyle fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#92400e
     classDef endStyle fill:#7f1d1d,stroke:#991b1b,stroke-width:3px,color:#fee2e2
+    classDef endStyleOrange fill:#ea580c,stroke:#c2410c,stroke-width:3px,color:#ffedd5
     classDef successStyle fill:#14532d,stroke:#166534,stroke-width:3px,color:#f0fdf4
 
     class Scheduler schedulerStyle
@@ -141,11 +142,12 @@ graph TB
     class FetchData,SQLQuery,BQ dataStyle
     class ApplyCriteria,FilterData,GenArtifacts processingStyle
     class Batch,TryRPC,BuildTx,SubmitTx,WaitReceipt,Rotate,RPCError blockchainStyle
-    class SlackSuccess,SlackFail,SlackRotate monitorStyle
+    class SlackSuccess,SlackFailCircuitBreaker,SlackFailRPC,SlackRotate monitorStyle
     class RPCProviders,HistoricalData,CBLog infraStyle
     class Contract contractStyle
-    class CacheCheck,RPCFail,MoreBatches,CBCheck decisionStyle
-    class END endStyle
+    class CacheCheck,MoreBatches,CBCheck decisionStyle
+    class END_NO_RESTART endStyle
+    class END_WITH_RESTART endStyleOrange
     class SUCCESS successStyle
 
     style DOCKER fill:#dbeafe,stroke:#2563eb,stroke-width:3px,color:#1e3a8a

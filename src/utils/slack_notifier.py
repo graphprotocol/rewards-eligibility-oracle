@@ -1,5 +1,5 @@
 """
-Slack notification utility for Service Quality Oracle.
+Slack notification utility for Rewards Eligibility Oracle.
 Provides simple, reliable notifications to Slack channels.
 """
 
@@ -76,7 +76,7 @@ class SlackNotifier:
                 {
                     "color": color,
                     "fields": fields,
-                    "footer": "Service Quality Oracle",
+                    "footer": "Rewards Eligibility Oracle",
                     "ts": int(datetime.now().timestamp()),
                 }
             ],
@@ -152,7 +152,7 @@ class SlackNotifier:
             fields.append({"title": "Transactions", "value": "\n".join(tx_links), "short": False})
 
         # Create message payload
-        payload = self._create_payload("Service Quality Oracle - Success", fields, "good")
+        payload = self._create_payload("Rewards Eligibility Oracle - Success", fields, "good")
 
         # Send message payload to Slack
         return self._send_message(payload)
@@ -224,7 +224,7 @@ class SlackNotifier:
         fields.append({"title": "Error", "value": f"```{error_text}```", "short": False})
 
         # Create message payload
-        payload = self._create_payload("Service Quality Oracle - FAILURE", fields, "danger")
+        payload = self._create_payload("Rewards Eligibility Oracle - FAILURE", fields, "danger")
 
         # Send message payload to Slack
         return self._send_message(payload)
@@ -250,7 +250,7 @@ class SlackNotifier:
         ]
 
         # Create message payload
-        payload = self._create_payload(f"Service Quality Oracle - {title}", fields)
+        payload = self._create_payload(f"Rewards Eligibility Oracle - {title}", fields)
 
         # Send message payload to Slack
         return self._send_message(payload)

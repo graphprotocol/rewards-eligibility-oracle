@@ -1,5 +1,5 @@
 """
-A provider for accessing Google BigQuery data for the Service Quality Oracle.
+A provider for accessing Google BigQuery data for the Rewards Eligibility Oracle.
 """
 
 import logging

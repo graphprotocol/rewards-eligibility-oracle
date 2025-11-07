@@ -1,5 +1,5 @@
 """
-Blockchain client for Service Quality Oracle.
+Blockchain client for Rewards Eligibility Oracle.
 
 This module handles all blockchain interactions including:
 - Contract ABI loading

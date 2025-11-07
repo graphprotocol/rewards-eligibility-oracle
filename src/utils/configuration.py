@@ -1,5 +1,5 @@
 """
-Centralized configuration and credential management for the Service Quality Oracle.
+Centralized configuration and credential management for the Rewards Eligibility Oracle.
 """
 
 import json

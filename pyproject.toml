@@ -1,4 +1,4 @@
-# This file is used to configure project settings and tools for the Service Quality Oracle project.
+# This file is used to configure project settings and tools for the Rewards Eligibility Oracle project.
 # It defines configurations for linting, formatting, and other development tools to maintain code quality
 # and consistency across the project. Specifically, it sets up rules for Ruff, a fast Python linter and
 # formatter, to enforce coding standards, manage import sorting, and handle code complexity.
@@ -41,7 +41,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 [tool.ruff.lint.per-file-ignores]
 # Ignore E402 (import not at top) in scripts and specific modules
 "scripts/test_*.py" = ["E402"]
-"src/models/service_quality_oracle.py" = ["E402"]
+"src/models/rewards_eligibility_oracle.py" = ["E402"]
 
 # Use unsafe fixes to address typing and other modernization issues
 [tool.ruff.lint.isort]

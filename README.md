@@ -1,4 +1,4 @@
-# Service Quality Oracle
+# Rewards Eligibility Oracle
 
 ## Overview
 
@@ -9,7 +9,7 @@ This repository implements a Docker container service for the Rewards Eligibilit
 The oracle runs with the following functionality:
 
 - **BigQuery Integration**: Fetches indexer performance data from Google BigQuery
-- **Eligibility Processing**: Applies threshold algorithm to determine rewards eligibility based on service quality
+- **Eligibility Processing**: Applies threshold algorithm to determine rewards eligibility based on eligibility criteria
 - **Blockchain Integration**: Posts rewards eligibility updates to the RewardsEligibilityOracle contract
 - **Slack Notifications**: Sends success/failure notifications for monitoring
 - **Docker Deployment**: Containerized and running with health checks
@@ -41,7 +41,7 @@ The application follows a clear data flow, managed by a daily scheduler:
 
 1. **Scheduler (`scheduler.py`)**: This is the main entry point. It runs on a schedule (e.g., daily), manages the application lifecycle, and triggers the oracle run. It is also responsible for catching up on any missed runs.
 
-2. **Orchestrator (`service_quality_oracle.py`)**: For each run, this module orchestrates the end-to-end process by coordinating the other components.
+2. **Orchestrator (`rewards_eligibility_oracle.py`)**: For each run, this module orchestrates the end-to-end process by coordinating the other components.
 
 3. **Data Fetching (`bigquery_provider.py`)**: The orchestrator calls this provider to execute a configurable SQL query against Google BigQuery, fetching the raw indexer performance data.
 

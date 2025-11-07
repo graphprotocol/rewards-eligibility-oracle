@@ -62,7 +62,7 @@ graph TB
         subgraph MONITOR["Monitoring & Notifications"]
             SlackSuccess["Slack Success:<br/>- Eligible count<br/>- Execution time<br/>- Transaction links"]
             SlackFailCircuitBreaker["Stop container sys.exit(0)<br/>Container will not restart<br/>Manual Intervention needed<br/>Send notification to team<br/>slack channel for debugging"]
-            SlackFailRPC["Stop container sys.exit(1)<br/>Container will restart automatically<br/>Send notification to team<br/>slack channel for debugging"]
+            SlackFailRPC["Stop container sys.exit(1)<br/>Container will restart<br/>Send notification to slack"]
             SlackRotate["Send slack notification"]
         end
     end
@@ -79,8 +79,8 @@ graph TB
         HistoricalData["Historical archive of<br/>eligible and ineligible<br/>indexers by date<br/>YYYY-MM-DD"]
     end
 
-    END_NO_RESTART["FAILURE<br/>Container Stopped<br/>No Restart (sys.exit 0)<br/>Manual Intervention Required"]
-    END_WITH_RESTART["FAILURE<br/>Container Stopped<br/>Docker Restarts Container (sys.exit 1)<br/>Will retry through circuit breaker"]
+    END_NO_RESTART["FAILURE<br/>Container Stopped<br/>No Restart<br/>Manual Intervention Required"]
+    END_WITH_RESTART["FAILURE<br/>Container Stopped<br/>Restart Container<br/>Will retry entire loop again"]
     SUCCESS["SUCCESS<br/>Wait for next<br/>scheduled trigger"]
 
     %% Main Flow - Start with Docker container to anchor it left
@@ -119,7 +119,7 @@ graph TB
 
     WaitReceipt -->|"Phase 4.4: Batch confirmed"| MoreBatches
 
-    MoreBatches -->|"Yes<br/>Process next"| Batch
+    MoreBatches -->|"Yes<br/>Back to phase 4 loop<br/>Process next batch"| Batch
     MoreBatches -->|"Phase 5: No<br/>All complete"| SlackSuccess
     SlackSuccess --> SUCCESS
 
@@ -162,33 +162,7 @@ graph TB
     style HistoricalDataStorage fill:#f3f4f6,stroke:#6b7280,stroke-width:2px,color:#374151
 ```
 
-### Key Flow Points
-
-**Daily Execution Trigger**
-The scheduler runs daily at a scheduled time. On startup, it checks for missed runs and can catch up on yesterday's data if needed (limited to 7-day lookback for cost control).
-
-**Circuit Breaker Protection**
-Before each run, the circuit breaker checks for failure patterns. If 3 or more failures occurred in the last 60 minutes, the system halts cleanly to prevent infinite restart loops.
-
-**Smart Caching**
-The system checks for fresh cached data (< 30 minutes old) before querying BigQuery. This reduces costs and improves performance for reruns or troubleshooting scenarios.
-
-**BigQuery Analysis**
-When cache is unavailable, the system fetches 28 days of indexer performance data, analyzing query success rates, latency, sync status, and subgraph coverage to determine eligibility.
-
-**Eligibility Criteria**
-Indexers must meet all thresholds to be eligible for rewards:
-
-- Active for 5+ days in the analysis period
-- Query latency under 5000ms
-- Blocks behind under 50000
-- Serving at least 1 subgraph with successful queries
-
-**Resilient Blockchain Submission**
-Eligible indexers are batched (125 per transaction) and submitted on-chain. The RPC failover system automatically rotates through multiple providers with 3 attempts each, ensuring high availability despite provider outages.
-
-**Comprehensive Monitoring**
-Slack notifications provide real-time visibility into oracle operations, including success metrics, failure diagnostics, and infrastructure events like RPC provider rotation.
+---
 
 ## RPC Provider Failover and Circuit Breaker Logic
 

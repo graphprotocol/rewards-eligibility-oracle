@@ -1,5 +1,5 @@
 """
-Private Key Validator for Service Quality Oracle
+Private Key Validator for Rewards Eligibility Oracle
 
 This module provides validation and formatting of private keys.
 """

@@ -105,10 +105,10 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Build and scan image
-        run: docker build -t service-quality-oracle:security-scan .
+        run: docker build -t rewards-eligibility-oracle:security-scan .
 
       - name: Run vulnerability scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'service-quality-oracle:security-scan'
+          image-ref: 'rewards-eligibility-oracle:security-scan'
           format: 'table' 

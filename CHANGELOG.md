@@ -1,9 +1,16 @@
 # Changelog
 
-All notable changes to the Service Quality Oracle project will be documented in this file.
+All notable changes to the Rewards Eligibility Oracle project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.4.1](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.0...v0.4.1) (2025-11-06)
+
+
+### Documentation
+
+* clean up stale README and apply auto formatting fixes  ([#47](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/47)) ([ba1ce3e](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/ba1ce3ee2aaf593ef32012201aa3767d3a76a01e))
 
 ## [0.4.0](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.3.0...v0.4.0) (2025-11-03)
 
@@ -36,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Improved Google Cloud credential handling with better error messages (#42)
 - Renamed contract from IssuanceEligibilityOracle to RewardsEligibilityOracle (#39)
-- Updated contract ABI to match deployed ServiceQualityOracle (#24)
+- Updated contract ABI to match deployed RewardsEligibilityOracle (#24)
 - Updated to production Docker image configuration (#16, #25)
 - Python upgraded from 3.11-slim to 3.13.7-slim (#30)
 

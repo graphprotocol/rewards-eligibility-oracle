@@ -1,4 +1,4 @@
-# Dockerfile to create a clean, lightweight Docker Image for the Service Quality Oracle
+# Dockerfile to create a clean, lightweight Docker Image for the Rewards Eligibility Oracle
 
 # Use Python 3.13.7 slim as the base image for a lightweight container
 FROM python:3.13.7-slim
@@ -7,7 +7,7 @@ FROM python:3.13.7-slim
 ARG VERSION=dev
 
 # Add metadata labels
-LABEL description="Service Quality Oracle" \
+LABEL description="Rewards Eligibility Oracle" \
       version="${VERSION}"
 
 # Set working directory

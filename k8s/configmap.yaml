@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: service-quality-oracle-config
+  name: rewards-eligibility-oracle-config
   labels:
-    app: service-quality-oracle
+    app: rewards-eligibility-oracle
 data:
   # BigQuery Configuration
   BIGQUERY_LOCATION_ID: "US"

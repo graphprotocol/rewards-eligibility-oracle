@@ -1,4 +1,4 @@
-# Requirements for Service Quality Oracle
+# Requirements for Rewards Eligibility Oracle
 # Requires Python 3.9+
 
 # Configuration management

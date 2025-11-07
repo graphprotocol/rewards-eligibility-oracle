@@ -132,8 +132,8 @@ jobs:
 
       - name: Build and test Docker image
         run: |
-          docker build -t service-quality-oracle:test .
-          docker create --name test-container service-quality-oracle:test
+          docker build -t rewards-eligibility-oracle:test .
+          docker create --name test-container rewards-eligibility-oracle:test
           docker rm test-container
 
       - name: Validate Docker Compose

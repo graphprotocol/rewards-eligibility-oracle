@@ -5,6 +5,13 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.1...v0.4.2) (2025-11-07)
+
+
+### Bug Fixes
+
+* configure release-please to auto-update Docker image versions ([#49](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/49)) ([caf6dbe](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/caf6dbe44ac5c4d5013983ec656bdbb7970ba652))
+
 ## [0.4.1](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.0...v0.4.1) (2025-11-06)
 
 

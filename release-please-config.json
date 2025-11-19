@@ -1,7 +1,7 @@
 {
   "packages": {
     ".": {
-      "release-type": "python",
+      "release-type": "simple",
       "package-name": "rewards-eligibility-oracle",
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,

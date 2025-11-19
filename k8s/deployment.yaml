@@ -17,11 +17,10 @@ spec:
       containers:
       - name: rewards-eligibility-oracle
         image: ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.4.1 # x-release-please-version
-        envFrom:
-        # Load all non-sensitive configuration from ConfigMap
-        - configMapRef:
-            name: rewards-eligibility-oracle-config
         env:
+        # Runtime-only configuration (not in config.toml)
+        - name: RUN_ON_STARTUP
+          value: "true"
         # Secrets from Kubernetes Secret
         - name: GOOGLE_APPLICATION_CREDENTIALS
           valueFrom:
@@ -59,6 +58,10 @@ spec:
               name: rewards-eligibility-oracle-secrets
               key: slack-webhook-url
         volumeMounts:
+        - name: config-volume
+          mountPath: /app/config.toml
+          subPath: config.toml
+          readOnly: true
         - name: data-volume
           mountPath: /app/data
         - name: logs-volume
@@ -90,6 +93,9 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 30
       volumes:
+      - name: config-volume
+        configMap:
+          name: rewards-eligibility-oracle-config
       - name: data-volume
         persistentVolumeClaim:
           claimName: rewards-eligibility-oracle-data

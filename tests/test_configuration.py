@@ -3,6 +3,7 @@ Unit tests for the configuration loader and validator.
 """
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -830,6 +831,230 @@ class TestCredentialManagerFilePathAuth:
         # Assert
         mock_google_auth_default.assert_called_once()
         assert credentials is not None
+
+
+class TestPrepareCredentialsForADC:
+    """Test prepare_credentials_for_adc() for Kubernetes and Docker compatibility"""
+
+
+    def test_prepare_credentials_for_adc_with_inline_json_service_account(
+        self, mock_env, tmp_path, mock_service_account_json
+    ):
+        """
+        GIVEN inline service account JSON in GOOGLE_APPLICATION_CREDENTIALS
+        WHEN prepare_credentials_for_adc() called
+        THEN writes to temp file, updates env var, sets correct permissions
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", mock_service_account_json)
+        manager = CredentialManager()
+
+        with patch("src.utils.configuration.Path") as mock_path_cls:
+            mock_temp_file = MagicMock()
+            mock_path_cls.return_value = mock_temp_file
+
+            # Mock the open context manager
+            with patch("builtins.open", create=True) as mock_open:
+                mock_file = MagicMock()
+                mock_open.return_value.__enter__.return_value = mock_file
+
+                # Act
+                manager.prepare_credentials_for_adc()
+
+                # Assert
+                # Verify temp file was opened for writing
+                mock_open.assert_called_once()
+
+                # Verify file permissions were set to 0o600
+                mock_temp_file.chmod.assert_called_once_with(0o600)
+
+                # Verify env var was updated to point to temp file
+                assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == str(mock_temp_file)
+
+
+    def test_prepare_credentials_for_adc_with_inline_json_authorized_user(
+        self, mock_env, tmp_path, mock_auth_user_json
+    ):
+        """
+        GIVEN inline authorized user JSON in GOOGLE_APPLICATION_CREDENTIALS
+        WHEN prepare_credentials_for_adc() called
+        THEN writes to temp file and updates env var (supports both credential types)
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", mock_auth_user_json)
+        manager = CredentialManager()
+
+        with patch("src.utils.configuration.Path") as mock_path_cls:
+            mock_temp_file = MagicMock()
+            mock_path_cls.return_value = mock_temp_file
+
+            with patch("builtins.open", create=True) as mock_open:
+                # Act
+                manager.prepare_credentials_for_adc()
+
+                # Assert
+                mock_open.assert_called_once()
+                mock_temp_file.chmod.assert_called_once_with(0o600)
+
+
+    def test_prepare_credentials_for_adc_with_file_path_existing(self, mock_env, tmp_path):
+        """
+        GIVEN GOOGLE_APPLICATION_CREDENTIALS set to existing file path
+        WHEN prepare_credentials_for_adc() called
+        THEN env var unchanged, no new temp file created
+        """
+        # Arrange
+        existing_file = tmp_path / "existing-credentials.json"
+        existing_file.write_text('{"type": "service_account", "project_id": "test"}')
+        original_path = str(existing_file)
+
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", original_path)
+        manager = CredentialManager()
+
+        # Act
+        manager.prepare_credentials_for_adc()
+
+        # Assert - env var should remain unchanged
+        assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == original_path
+
+
+    def test_prepare_credentials_for_adc_with_file_path_nonexistent(self, mock_env, caplog):
+        """
+        GIVEN GOOGLE_APPLICATION_CREDENTIALS set to nonexistent file path
+        WHEN prepare_credentials_for_adc() called
+        THEN logs warning, no error raised (graceful degradation)
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/path/creds.json")
+        manager = CredentialManager()
+
+        # Act
+        manager.prepare_credentials_for_adc()
+
+        # Assert
+        assert "not found" in caplog.text.lower()
+
+
+    def test_prepare_credentials_for_adc_with_invalid_json(self, mock_env):
+        """
+        GIVEN GOOGLE_APPLICATION_CREDENTIALS with malformed JSON
+        WHEN prepare_credentials_for_adc() called
+        THEN raises ValueError (Fail Fast)
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", '{"invalid": json}')
+        manager = CredentialManager()
+
+        # Act & Assert
+        with pytest.raises(ValueError, match="Invalid credentials JSON"):
+            manager.prepare_credentials_for_adc()
+
+
+    def test_prepare_credentials_for_adc_with_incomplete_json(self, mock_env):
+        """
+        GIVEN valid JSON but missing required fields
+        WHEN prepare_credentials_for_adc() called
+        THEN raises ValueError from validation (Fail Fast)
+        """
+        # Arrange - service account missing required fields
+        incomplete_json = '{"type": "service_account"}'
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", incomplete_json)
+        manager = CredentialManager()
+
+        # Act & Assert
+        with pytest.raises(ValueError, match="Incomplete service_account credentials"):
+            manager.prepare_credentials_for_adc()
+
+
+    def test_prepare_credentials_for_adc_without_env_var(self, mock_env, caplog):
+        """
+        GIVEN GOOGLE_APPLICATION_CREDENTIALS not set
+        WHEN prepare_credentials_for_adc() called
+        THEN logs warning, returns gracefully
+        """
+        # Arrange
+        mock_env.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+        manager = CredentialManager()
+
+        # Act
+        manager.prepare_credentials_for_adc()
+
+        # Assert
+        assert "not set" in caplog.text
+
+
+    def test_prepare_credentials_for_adc_clears_sensitive_data(self, mock_env, mock_service_account_json):
+        """
+        GIVEN inline JSON credentials
+        WHEN prepare_credentials_for_adc() called
+        THEN credentials dict is cleared from memory (security)
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", mock_service_account_json)
+        manager = CredentialManager()
+
+        # Track if clear() was called on the dict
+        clear_called = False
+
+        # Create a custom dict class that tracks clear() calls
+
+
+        class TrackableDict(dict):
+
+
+            def clear(self):
+                nonlocal clear_called
+                clear_called = True
+                super().clear()
+
+        # Mock the validation to return our trackable dict
+        with (
+            patch.object(manager, "_parse_and_validate_credentials_json") as mock_parse,
+            patch("src.utils.configuration.Path"),
+            patch("builtins.open", create=True),
+        ):
+            # Create trackable dict with expected data
+            tracked_dict = TrackableDict(json.loads(mock_service_account_json))
+            mock_parse.return_value = tracked_dict
+
+            # Act
+            manager.prepare_credentials_for_adc()
+
+            # Assert
+            assert clear_called, "Credentials data should be cleared from memory"
+
+
+    def test_prepare_credentials_for_adc_temp_file_contents_valid(
+        self, mock_env, tmp_path, mock_service_account_json
+    ):
+        """
+        GIVEN inline JSON credentials
+        WHEN prepare_credentials_for_adc() called
+        THEN temp file contains valid, parseable JSON matching input
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", mock_service_account_json)
+        manager = CredentialManager()
+
+        # Use tmp_path instead of /tmp for testing
+        temp_file_path = tmp_path / "gcp-credentials.json"
+
+        # Mock Path to return our test path
+        with patch("src.utils.configuration.Path") as mock_path_cls:
+            mock_path_cls.return_value = temp_file_path
+
+            # Act
+            manager.prepare_credentials_for_adc()
+
+            # Assert - verify written data is valid JSON
+            assert temp_file_path.exists()
+            written_content = temp_file_path.read_text()
+            parsed = json.loads(written_content)
+            expected = json.loads(mock_service_account_json)
+            assert parsed == expected
+
+            # Verify permissions were set correctly
+            assert oct(temp_file_path.stat().st_mode)[-3:] == "600"
 
 
 class TestLoadConfig:

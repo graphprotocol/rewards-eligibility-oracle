@@ -367,8 +367,10 @@ class CredentialManager:
             return credentials
 
         except Exception as e:
-            error_msg = f"Failed to load Google Cloud credentials: {e}"
-            logger.error(error_msg)
+            error_msg = (
+                "Failed to load Google Cloud credentials. Check GOOGLE_APPLICATION_CREDENTIALS configuration."
+            )
+            logger.error(f"{error_msg} Error details: {type(e).__name__}")
             raise ValueError(error_msg)
 
 
@@ -407,8 +409,14 @@ class CredentialManager:
 
             return creds_data
 
-        except Exception as e:
-            raise ValueError(f"Invalid credentials JSON: {e}") from e
+        except json.JSONDecodeError:
+            raise ValueError("Invalid credentials JSON format. Expected valid JSON string.")
+        except ValueError:
+            # Re-raise our own validation errors with their specific messages
+            raise
+        except Exception:
+            # Catch-all for unexpected errors - don't leak credential data
+            raise ValueError("Invalid or incomplete credentials. Check credentials structure.")
 
 
     def _setup_user_credentials_from_dict(self, creds_data: dict) -> None:
@@ -444,8 +452,70 @@ class CredentialManager:
             logger.info("Successfully loaded service account credentials from environment variable")
 
         # If the credentials creation fails, raise an error
-        except Exception as e:
-            raise ValueError(f"Invalid service account credentials: {e}") from e
+        except Exception:
+            raise ValueError(
+                "Invalid service account credentials. Check private_key, client_email, and project_id fields."
+            )
+
+
+    def prepare_credentials_for_adc(self) -> None:
+        """
+        Prepare Google credentials for Application Default Credentials (ADC).
+
+        Supports both inline JSON and file paths:
+            - Inline JSON: Writes temp file and updates env var
+            - File path: Validates existence, logs warning if not found
+
+        This enables google.auth.default() to work with both credential sources while
+        maintaining official API usage.
+
+        Raises:
+            ValueError: If inline JSON is invalid or incomplete
+        """
+        creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
+        # If not set, log warning and return
+        if not creds_env:
+            logger.warning("GOOGLE_APPLICATION_CREDENTIALS not set. Will fall back to ADC.")
+            return
+
+        # Inline JSON pattern
+        if creds_env.strip().startswith("{"):
+            creds_data = None
+            try:
+                # Validate JSON structure
+                creds_data = self._parse_and_validate_credentials_json(creds_env)
+
+                # Write to temp file
+                temp_path = Path("/tmp/gcp-credentials.json")
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(creds_data, f)
+
+                # Set restrictive permissions
+                temp_path.chmod(0o600)
+
+                # Update env var
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(temp_path)
+
+                logger.info("Prepared inline JSON credentials for ADC")
+
+            except ValueError:
+                # Re-raise our own validation errors
+                raise
+
+            except Exception:
+                # Catch unexpected errors without leaking credential data
+                raise ValueError("Failed to prepare inline credentials. Check JSON format and structure.")
+
+            finally:
+                # Clear data from memory
+                if creds_data:
+                    creds_data.clear()
+
+        # File path pattern
+        elif not Path(creds_env).exists():
+            logger.warning(f"Credentials file not found: {creds_env}")
+            logger.warning("Will attempt to use gcloud CLI or other ADC sources")
 
 
     def setup_google_credentials(self) -> None:
@@ -477,8 +547,12 @@ class CredentialManager:
                     self._setup_service_account_credentials_from_dict(creds_data.copy())
 
             # If the credentials parsing fails, raise an error
-            except Exception as e:
-                raise ValueError(f"Error processing inline credentials: {e}") from e
+            except ValueError:
+                # Re-raise our own validation errors
+                raise
+            except Exception:
+                # Catch unexpected errors without leaking credential data
+                raise ValueError("Error processing inline credentials. Check format and required fields.")
 
             # Clear the credentials from memory
             finally:

@@ -33,10 +33,9 @@ def main(run_date_override: date = None):
     """
     Main entry point for the Rewards Eligibility Oracle.
     This function:
-    1. Sets up Google credentials (if not already set up by scheduler)
-    2. Fetches and processes indexer eligibility data
-    3. Submits eligible indexers to the blockchain
-    4. Sends Slack notifications about the run status
+        1. Fetches and processes indexer eligibility data
+        2. Submits eligible indexers to the blockchain
+        3. Sends Slack notifications about the run status
 
     Args:
         run_date_override: If provided, use this date for the run instead of today.

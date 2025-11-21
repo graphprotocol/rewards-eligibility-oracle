@@ -593,18 +593,32 @@ class TestCredentialManager:
         """
         GIVEN the Google SDK fails to create credentials from service account info
         WHEN _setup_service_account_credentials_from_dict is called
-        THEN it should raise a ValueError.
+        THEN it should raise a ValueError without leaking credential values.
         """
         # Arrange
+        # Simulate an SDK error that might contain credentials
+        error_with_creds = (
+            'SDK Error: {"private_key": "-----BEGIN PRIVATE KEY-----SECRET123", "project_id": "test"}'
+        )
         mock_google_auth["service_account"].Credentials.from_service_account_info.side_effect = Exception(
-            "SDK Error"
+            error_with_creds
         )
         manager = CredentialManager()
         creds_data = json.loads(mock_service_account_json)
 
         # Act & Assert
-        with pytest.raises(ValueError, match="Invalid service account credentials: SDK Error"):
+        with pytest.raises(ValueError) as exc_info:
             manager._setup_service_account_credentials_from_dict(creds_data)
+
+        error_message = str(exc_info.value)
+
+        # Verify error does not leak actual credential values
+        assert "SECRET123" not in error_message
+        assert "BEGIN PRIVATE KEY" not in error_message
+        assert '{"private_key"' not in error_message
+
+        # Verify it has the generic error message
+        assert "Invalid service account credentials" in error_message
 
 
     def test_setup_google_credentials_succeeds_with_authorized_user_json(
@@ -815,6 +829,38 @@ class TestCredentialManagerFilePathAuth:
                 manager.get_google_credentials()
 
 
+    def test_get_google_credentials_does_not_leak_credentials_in_error(self, mock_env):
+        """
+        GIVEN google.auth.default() raises exception containing credentials
+        WHEN get_google_credentials() called
+        THEN Error message does not contain sensitive credential data
+        """
+        # Arrange
+        mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/file.json")
+        manager = CredentialManager()
+
+        # Simulate an exception that contains credentials in the message
+        sensitive_error = Exception(
+            'Failed to load: {"type": "service_account", "private_key": "SECRET_KEY_123", "project_id": "test"}'
+        )
+
+        with patch("google.auth.default", side_effect=sensitive_error):
+            # Act & Assert
+            with pytest.raises(ValueError) as exc_info:
+                manager.get_google_credentials()
+
+            error_message = str(exc_info.value)
+
+            # Verify error message does not contain sensitive data from the original exception
+            assert "SECRET_KEY_123" not in error_message
+            assert "private_key" not in error_message
+            assert "service_account" not in error_message
+
+            # Verify it contains the generic error message
+            assert "Failed to load Google Cloud credentials" in error_message
+            assert "Check GOOGLE_APPLICATION_CREDENTIALS configuration" in error_message
+
+
     def test_get_google_credentials_works_without_env_var(self, mock_env, mock_google_auth_default):
         """
         GIVEN No GOOGLE_APPLICATION_CREDENTIALS set (gcloud CLI)
@@ -939,15 +985,21 @@ class TestPrepareCredentialsForADC:
         """
         GIVEN GOOGLE_APPLICATION_CREDENTIALS with malformed JSON
         WHEN prepare_credentials_for_adc() called
-        THEN raises ValueError (Fail Fast)
+        THEN raises ValueError without leaking credentials (Fail Fast)
         """
         # Arrange
         mock_env.setenv("GOOGLE_APPLICATION_CREDENTIALS", '{"invalid": json}')
         manager = CredentialManager()
 
         # Act & Assert
-        with pytest.raises(ValueError, match="Invalid credentials JSON"):
+        with pytest.raises(ValueError) as exc_info:
             manager.prepare_credentials_for_adc()
+
+        error_message = str(exc_info.value)
+
+        # Verify error message is generic and doesn't leak the malformed JSON
+        assert "Invalid credentials JSON format" in error_message
+        assert "json}" not in error_message
 
 
     def test_prepare_credentials_for_adc_with_incomplete_json(self, mock_env):

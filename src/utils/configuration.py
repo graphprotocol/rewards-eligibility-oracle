@@ -448,6 +448,65 @@ class CredentialManager:
             raise ValueError(f"Invalid service account credentials: {e}") from e
 
 
+    def prepare_credentials_for_adc(self) -> None:
+        """
+        Prepare Google credentials for Application Default Credentials (ADC).
+
+        Supports both inline JSON and file paths:
+            - Inline JSON: Writes temp file and updates env var
+            - File path: Validates existence, logs warning if not found
+
+        This enables google.auth.default() to work with both credential sources while
+        maintaining official API usage.
+
+        Raises:
+            ValueError: If inline JSON is invalid or incomplete
+        """
+        creds_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+
+        # If not set, log warning and return
+        if not creds_env:
+            logger.warning("GOOGLE_APPLICATION_CREDENTIALS not set. Will fall back to ADC.")
+            return
+
+        # Inline JSON pattern
+        if creds_env.strip().startswith("{"):
+            creds_data = None
+            try:
+                # Validate JSON structure
+                creds_data = self._parse_and_validate_credentials_json(creds_env)
+
+                # Write to temp file
+                temp_path = Path("/tmp/gcp-credentials.json")
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(creds_data, f)
+
+                # Set restrictive permissions
+                temp_path.chmod(0o600)
+
+                # Update env var
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(temp_path)
+
+                logger.info("Prepared inline JSON credentials for ADC")
+
+            except ValueError:
+                # Re-raise validation errors
+                raise
+
+            except Exception as e:
+                raise ValueError(f"Failed to prepare inline credentials: {e}") from e
+
+            finally:
+                # Clear data from memory
+                if creds_data:
+                    creds_data.clear()
+
+        # File path pattern
+        elif not Path(creds_env).exists():
+            logger.warning(f"Credentials file not found: {creds_env}")
+            logger.warning("Will attempt to use gcloud CLI or other ADC sources")
+
+
     def setup_google_credentials(self) -> None:
         """
         Set up Google credentials directly in memory from environment variable.

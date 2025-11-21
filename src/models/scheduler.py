@@ -159,6 +159,9 @@ class Scheduler:
         try:
             validate_all_required_env_vars()
 
+            # Prepare credentials using inline JSON or file paths
+            credential_manager.prepare_credentials_for_adc()
+
             # Validate credentials early (Fail Fast)
             try:
                 credential_manager.get_google_credentials()

@@ -5,6 +5,13 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.3...v0.4.4) (2025-11-21)
+
+
+### Added
+
+* **auth:** support Kubernetes inline credentials ([#67](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/67)) ([b1d99e6](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/b1d99e6f0f34afad99b0fb36036c2548e5aae9e3))
+
 ## [0.4.3](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.2...v0.4.3) (2025-11-21)
 
 

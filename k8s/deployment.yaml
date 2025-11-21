@@ -42,16 +42,6 @@ spec:
             secretKeyRef:
               name: rewards-eligibility-oracle-secrets
               key: arbitrum-api-key
-        - name: STUDIO_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: rewards-eligibility-oracle-secrets
-              key: studio-api-key
-        - name: STUDIO_DEPLOY_KEY
-          valueFrom:
-            secretKeyRef:
-              name: rewards-eligibility-oracle-secrets
-              key: studio-deploy-key
         - name: SLACK_WEBHOOK_URL
           valueFrom:
             secretKeyRef:

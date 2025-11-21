@@ -1,4 +1,4 @@
-# Rewards Eligibility Configuration
+# Rewards Eligibility Oracle Configuration
 # This file separates sensitive secrets from non-sensitive configuration values
 
 # =============================================================================
@@ -6,30 +6,30 @@
 # =============================================================================
 
 [bigquery]
-BIGQUERY_LOCATION_ID = ""
-BIGQUERY_PROJECT_ID = ""
-BIGQUERY_DATASET_ID = ""
-BIGQUERY_TABLE_ID = ""
+BIGQUERY_LOCATION_ID = "US"
+BIGQUERY_PROJECT_ID = "graph-mainnet"
+BIGQUERY_DATASET_ID = "internal_metrics"
+BIGQUERY_TABLE_ID = "metrics_indexer_attempts"
+BIGQUERY_CURATION_TABLE_ID = "metrics_curator_signals"
+BIGQUERY_CURATOR_MAINNET_TABLE_ID = "curator_name_signal_dimensions_daily"
+BIGQUERY_CURATOR_ARBITRUM_TABLE_ID = "curator_name_signal_dimensions_arbitrum_daily"
+BIGQUERY_SUBGRAPH_LOOKUP_TABLE_ID = "subgraph_version_id_lookup"
 
 [blockchain]
-BLOCKCHAIN_CONTRACT_ADDRESS = ""
+BLOCKCHAIN_CONTRACT_ADDRESS = "0x9BED32d2b562043a426376b99d289fE821f5b04E"
 BLOCKCHAIN_FUNCTION_NAME = "renewIndexerEligibility"
-BLOCKCHAIN_CHAIN_ID = ""
+BLOCKCHAIN_CHAIN_ID = 421614
 BLOCKCHAIN_RPC_URLS = [
-    "",
-    "",
-    "",
-    ""
+    "https://arbitrum-sepolia.drpc.org",
+    "https://sepolia-rollup.arbitrum.io/rpc",
+    "https://api.zan.top/arb-sepolia",
+    "https://arbitrum-sepolia.gateway.tenderly.co"
 ]
 BLOCK_EXPLORER_URL = "https://sepolia.arbiscan.io"
 TX_TIMEOUT_SECONDS = "30"
 
 [scheduling]
 SCHEDULED_RUN_TIME = "10:00"
-
-[subgraph]
-SUBGRAPH_URL_PRE_PRODUCTION = ""
-SUBGRAPH_URL_PRODUCTION = ""
 
 [processing]
 BATCH_SIZE = 125
@@ -55,8 +55,6 @@ MAX_BLOCKS_BEHIND = "50000"
 [secrets]
 GOOGLE_APPLICATION_CREDENTIALS = "$GOOGLE_APPLICATION_CREDENTIALS"
 BLOCKCHAIN_PRIVATE_KEY = "$BLOCKCHAIN_PRIVATE_KEY"
-ETHERSCAN_API_KEY = "$ETHERSCAN_API_KEY" 
+ETHERSCAN_API_KEY = "$ETHERSCAN_API_KEY"
 ARBITRUM_API_KEY = "$ARBITRUM_API_KEY"
-STUDIO_API_KEY = "$STUDIO_API_KEY"
-STUDIO_DEPLOY_KEY = "$STUDIO_DEPLOY_KEY"
 SLACK_WEBHOOK_URL = "$SLACK_WEBHOOK_URL"

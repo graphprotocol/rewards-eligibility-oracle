@@ -36,8 +36,6 @@ MOCK_CONFIG = {
     "SCHEDULED_RUN_TIME": "10:00",
     "SUBGRAPH_URL_PRE_PRODUCTION": "http://fake.url",
     "SUBGRAPH_URL_PRODUCTION": "http://fake.url",
-    "STUDIO_API_KEY": "fake-api-key",
-    "STUDIO_DEPLOY_KEY": "fake-deploy-key",
     "ETHERSCAN_API_KEY": "fake-etherscan-key",
     "ARBITRUM_API_KEY": "fake-arbitrum-key",
 }

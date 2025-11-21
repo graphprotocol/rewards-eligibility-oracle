@@ -39,10 +39,6 @@ data:
     [scheduling]
     SCHEDULED_RUN_TIME = "10:00"
 
-    [subgraph]
-    SUBGRAPH_URL_PRE_PRODUCTION = "https://api.studio.thegraph.com/query/110664/issuance-eligibility-oracle/v0.1.4"
-    SUBGRAPH_URL_PRODUCTION = "https://gateway.thegraph.com/api/subgraphs/id/"
-
     [processing]
     BATCH_SIZE = 125
     MAX_AGE_BEFORE_DELETION = 120
@@ -59,7 +55,6 @@ data:
     MIN_SUBGRAPHS = "1"
     MAX_LATENCY_MS = "5000"
     MAX_BLOCKS_BEHIND = "50000"
-    MIN_CURATION_SIGNAL = "500"
 
     # =============================================================================
     # SENSITIVE CONFIGURATION
@@ -70,6 +65,4 @@ data:
     BLOCKCHAIN_PRIVATE_KEY = "$BLOCKCHAIN_PRIVATE_KEY"
     ETHERSCAN_API_KEY = "$ETHERSCAN_API_KEY"
     ARBITRUM_API_KEY = "$ARBITRUM_API_KEY"
-    STUDIO_API_KEY = "$STUDIO_API_KEY"
-    STUDIO_DEPLOY_KEY = "$STUDIO_DEPLOY_KEY"
     SLACK_WEBHOOK_URL = "$SLACK_WEBHOOK_URL"

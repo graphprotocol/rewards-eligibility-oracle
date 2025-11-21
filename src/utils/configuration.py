@@ -165,12 +165,6 @@ class ConfigLoader:
             # Scheduling
             "SCHEDULED_RUN_TIME": substituted_config.get("scheduling", {}).get("SCHEDULED_RUN_TIME"),
 
-            # Subgraph URLs
-            "SUBGRAPH_URL_PRE_PRODUCTION": substituted_config.get("subgraph", {}).get(
-                "SUBGRAPH_URL_PRE_PRODUCTION"
-            ),
-            "SUBGRAPH_URL_PRODUCTION": substituted_config.get("subgraph", {}).get("SUBGRAPH_URL_PRODUCTION"),
-
             # Processing settings
             "BATCH_SIZE": to_int(substituted_config.get("processing", {}).get("BATCH_SIZE")),
             "MAX_AGE_BEFORE_DELETION": to_int(
@@ -185,8 +179,6 @@ class ConfigLoader:
                 "GOOGLE_APPLICATION_CREDENTIALS"
             ),
             "PRIVATE_KEY": substituted_config.get("secrets", {}).get("BLOCKCHAIN_PRIVATE_KEY"),
-            "STUDIO_API_KEY": substituted_config.get("secrets", {}).get("STUDIO_API_KEY"),
-            "STUDIO_DEPLOY_KEY": substituted_config.get("secrets", {}).get("STUDIO_DEPLOY_KEY"),
             "SLACK_WEBHOOK_URL": substituted_config.get("secrets", {}).get("SLACK_WEBHOOK_URL"),
             "ETHERSCAN_API_KEY": substituted_config.get("secrets", {}).get("ETHERSCAN_API_KEY"),
             "ARBITRUM_API_KEY": substituted_config.get("secrets", {}).get("ARBITRUM_API_KEY"),
@@ -259,8 +251,6 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
         "BLOCK_EXPLORER_URL",
         "TX_TIMEOUT_SECONDS",
         "SCHEDULED_RUN_TIME",
-        "SUBGRAPH_URL_PRE_PRODUCTION",
-        "SUBGRAPH_URL_PRODUCTION",
         "BATCH_SIZE",
         "MAX_AGE_BEFORE_DELETION",
         "BIGQUERY_ANALYSIS_PERIOD_DAYS",

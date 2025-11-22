@@ -5,6 +5,18 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.5...v0.4.6) (2025-11-22)
+
+
+### Fixed
+
+* remove unused keys/URLs from config ([3d9f6a1](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/3d9f6a1c3ca837e28cfe803647ea6596822f61a3))
+
+
+### Changed
+
+* **main:** release 0.4.5 ([#70](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/70)) ([8339a26](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/8339a26edcc32ed3b0dfed8034180fb590bde538))
+
 ## [0.4.5](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.4...v0.4.5) (2025-11-22)
 
 

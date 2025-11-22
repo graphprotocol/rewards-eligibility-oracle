@@ -53,7 +53,7 @@ RUN touch /app/healthcheck
 
 # Create non-root user with UID 1000 to match Kubernetes securityContext
 # This ensures the application can write to /app/healthcheck at runtime
-RUN groupadd -g 1000 oracle && \
+RUN groupadd -f -g 1000 oracle && \
     useradd -u 1000 -g oracle -s /bin/bash -m oracle
 
 # Change ownership of all /app files to the oracle user

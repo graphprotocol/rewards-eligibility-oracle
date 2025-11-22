@@ -24,7 +24,6 @@ from src.utils.configuration import (
 MOCK_TOML_CONFIG = """
 [secrets]
 BLOCKCHAIN_PRIVATE_KEY = "$TEST_PRIVATE_KEY"
-STUDIO_API_KEY = "$STUDIO_API_KEY"
 
 [scheduling]
 SCHEDULED_RUN_TIME = "10:00"
@@ -103,8 +102,6 @@ def full_valid_config() -> dict:
         "BIGQUERY_ANALYSIS_PERIOD_DAYS": 28,
         "GOOGLE_APPLICATION_CREDENTIALS": "/path/to/creds.json",  # Added for completeness
         "PRIVATE_KEY": "0x123",
-        "STUDIO_API_KEY": "key",
-        "STUDIO_DEPLOY_KEY": "key",
         "SLACK_WEBHOOK_URL": "http://slack.com",
         "ETHERSCAN_API_KEY": "key",
         "ARBITRUM_API_KEY": "key",
@@ -123,7 +120,6 @@ def temp_config_file(tmp_path: Path) -> str:
 def mock_env(monkeypatch):
     """A fixture to mock standard environment variables."""
     monkeypatch.setenv("TEST_PRIVATE_KEY", "0x12345")
-    monkeypatch.setenv("STUDIO_API_KEY", "studio-key")
     return monkeypatch
 
 
@@ -168,7 +164,6 @@ class TestConfigLoader:
 
         # Assert
         assert config["PRIVATE_KEY"] == "0x12345"
-        assert config["STUDIO_API_KEY"] == "studio-key"
         assert config["SCHEDULED_RUN_TIME"] == "10:00"
         assert config["BIGQUERY_PROJECT_ID"] == "test-project"
         assert config["BLOCKCHAIN_RPC_URLS"] == ["http://main.com", "http://backup.com"]
@@ -333,12 +328,11 @@ class TestConfigLoader:
         """
         # Arrange
         monkeypatch.delenv("TEST_PRIVATE_KEY", raising=False)
-        monkeypatch.delenv("STUDIO_API_KEY", raising=False)
         loader = ConfigLoader(config_path=temp_config_file)
         # Act
         missing = loader.get_missing_env_vars()
         # Assert
-        assert sorted(missing) == sorted(["TEST_PRIVATE_KEY", "STUDIO_API_KEY"])
+        assert sorted(missing) == sorted(["TEST_PRIVATE_KEY"])
 
 
     @pytest.mark.parametrize(

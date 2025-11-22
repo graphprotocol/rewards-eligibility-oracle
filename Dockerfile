@@ -51,7 +51,7 @@ COPY pyproject.toml ./
 # Create healthcheck file
 RUN touch /app/healthcheck
 
-# Create non-root user with UID 1000 to match Kubernetes securityContext
+# Create non-root user with UID 1000 for improved security
 # This ensures the application can write to /app/healthcheck at runtime
 RUN groupadd -f -g 1000 oracle && \
     useradd -u 1000 -g oracle -s /bin/bash -m oracle

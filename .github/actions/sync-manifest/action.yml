@@ -1,0 +1,78 @@
+name: 'Sync Release Manifest'
+description: 'Check for and optionally fix drift between git tags and release-please manifest'
+
+inputs:
+  auto-commit:
+    description: 'Whether to automatically commit and push manifest updates'
+    required: false
+    default: 'true'
+
+outputs:
+  drift:
+    description: 'Whether manifest drift was detected'
+    value: ${{ steps.check.outputs.drift }}
+  latest-version:
+    description: 'Latest version from git tags'
+    value: ${{ steps.check.outputs.latest_version }}
+  manifest-version:
+    description: 'Version currently in manifest'
+    value: ${{ steps.check.outputs.manifest_version }}
+  synced:
+    description: 'Whether the manifest was synced'
+    value: ${{ steps.update.outputs.synced || 'false' }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check for manifest drift
+      id: check
+      shell: bash
+      run: |
+        # Get latest tag (with fallback if no tags exist)
+        LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "v0.0.0")
+        LATEST_VERSION="${LATEST_TAG#v}"
+
+        # Get manifest version (with error handling for missing/invalid file)
+        MANIFEST_VERSION=$(jq -r '.["."] // "0.0.0"' .release-please-manifest.json 2>/dev/null || echo "0.0.0")
+
+        echo "Latest tag: $LATEST_TAG ($LATEST_VERSION)"
+        echo "Manifest version: $MANIFEST_VERSION"
+
+        # Check if they match
+        if [ "$LATEST_VERSION" != "$MANIFEST_VERSION" ]; then
+          echo "drift=true" >> $GITHUB_OUTPUT
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "manifest_version=$MANIFEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Drift detected - manifest needs update"
+        else
+          echo "drift=false" >> $GITHUB_OUTPUT
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "manifest_version=$MANIFEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Manifest is in sync with tags"
+        fi
+
+    - name: Update manifest if drifted
+      id: update
+      if: steps.check.outputs.drift == 'true' && inputs.auto-commit == 'true'
+      shell: bash
+      run: |
+        VERSION="${{ steps.check.outputs.latest_version }}"
+
+        # Update manifest (with error handling for missing/invalid file)
+        if ! jq --arg version "$VERSION" '.["."] = $version' .release-please-manifest.json > manifest.tmp 2>/dev/null; then
+          echo "Warning: Could not update manifest, creating new one"
+          echo "{\".\": \"$VERSION\"}" > manifest.tmp
+        fi
+        mv manifest.tmp .release-please-manifest.json
+
+        # Configure git
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        # Commit and push
+        git add .release-please-manifest.json
+        git commit -m "chore: auto-sync manifest to $VERSION (was ${{ steps.check.outputs.manifest_version }}) [skip ci]"
+        git push origin main
+
+        echo "synced=true" >> $GITHUB_OUTPUT
+        echo "Manifest synced: ${{ steps.check.outputs.manifest_version }} -> $VERSION"

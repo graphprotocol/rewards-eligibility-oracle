@@ -1,0 +1,41 @@
+name: Sync Release Manifest
+
+# Auto-heal release-please manifest if it drifts from actual tags
+# Runs daily and can be triggered manually
+
+on:
+  schedule:
+    # Run daily at 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync-manifest:
+    name: Sync Manifest with Git Tags
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync manifest with tags
+        id: sync
+        uses: ./.github/actions/sync-manifest
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.sync.outputs.drift }}" == "true" ]; then
+            echo "### Manifest Auto-Synced" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Previous version:** ${{ steps.sync.outputs.manifest-version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Latest tag:** ${{ steps.sync.outputs.latest-version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Action:** Manifest updated automatically" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Manifest In Sync" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No action needed. Manifest matches latest tag." >> $GITHUB_STEP_SUMMARY
+          fi

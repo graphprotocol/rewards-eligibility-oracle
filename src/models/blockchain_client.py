@@ -148,6 +148,21 @@ class BlockchainClient:
         self._connect_to_rpc()
 
 
+    def _is_nonce_error(self, error_message: str) -> bool:
+        """
+        Check if an error message indicates a nonce-related issue.
+
+        Args:
+            error_message: The error message string to check.
+
+        Returns:
+            True if the error is nonce-related, False otherwise.
+        """
+        nonce_error_patterns = ["nonce too low", "nonce is too low", "invalid nonce"]
+        error_lower = error_message.lower()
+        return any(pattern in error_lower for pattern in nonce_error_patterns)
+
+
     def _execute_rpc_call(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
         """
         Execute an RPC call with retry and failover logic.
@@ -446,13 +461,14 @@ class BlockchainClient:
         raise Exception("Transaction failed for an unknown reason.")
 
 
-    def _execute_complete_transaction(self, params: Dict) -> str:
+    def _execute_complete_transaction(self, params: Dict, rpc_rotation_count: int = 0) -> str:
         """
         Execute the full lifecycle of a blockchain transaction.
 
         This method orchestrates the entire process of sending a transaction,
         including parameter validation, gas estimation, nonce determination,
-        transaction building, signing, and sending.
+        transaction building, signing, and sending. If a nonce error occurs,
+        the method will rotate to the next RPC provider and retry with a fresh nonce.
 
         Args:
             params (Dict): A dictionary containing all necessary parameters for the transaction.
@@ -462,6 +478,8 @@ class BlockchainClient:
                 - contract_function (str): The name of the contract function to call.
                 - chain_id (int): The ID of the blockchain.
                 - replace (bool): Flag to indicate if a pending transaction should be replaced.
+            rpc_rotation_count (int): Number of times RPC has been rotated for this transaction.
+                Used internally to prevent infinite rotation loops.
 
         Returns:
             str: The transaction hash of the successful transaction.
@@ -470,6 +488,9 @@ class BlockchainClient:
             ValueError: If required parameters are missing.
             Exception: For errors during the transaction process.
         """
+        # Calculate max rotations based on number of providers (try each provider once)
+        max_rpc_rotations = len(self.rpc_providers) - 1
+
         # Validate required parameters
         required_params = [
             "private_key",
@@ -525,8 +546,24 @@ class BlockchainClient:
             contract_func, indexer_addresses, data_bytes, tx_params, formatted_private_key
         )
 
-        # 8. Send transaction
-        return self._send_signed_transaction(signed_tx)
+        # 8. Send transaction with nonce error handling and RPC rotation
+        try:
+            return self._send_signed_transaction(signed_tx)
+
+        except Exception as e:
+            # Check if this is a nonce error and we haven't exhausted RPC rotations
+            if self._is_nonce_error(str(e)) and rpc_rotation_count < max_rpc_rotations:
+                logger.warning(
+                    f"Nonce error detected (attempt {rpc_rotation_count + 1}/{max_rpc_rotations + 1}): {e}. "
+                    f"Rotating RPC provider and retrying with fresh nonce."
+                )
+                self._get_next_rpc_provider()
+
+                # Re-execute with new provider to fetch fresh nonce
+                return self._execute_complete_transaction(params, rpc_rotation_count + 1)
+
+            # Non-nonce error or rotations exhausted - re-raise
+            raise
 
 
     def send_transaction_to_renew_indexer_rewards_eligibility(

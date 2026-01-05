@@ -20,8 +20,17 @@ from web3.contract import Contract
 from web3.exceptions import (
     BadFunctionCallOutput,
     BlockNotFound,
+    BlockNumberOutOfRange,
+    CannotHandleRequest,
     MethodUnavailable,
     MismatchedABI,
+    MultipleFailedRequests,
+    PersistentConnectionError,
+    ProviderConnectionError,
+    RequestTimedOut,
+    StaleBlockchain,
+    TooManyRequests,
+    TransactionIndexingInProgress,
     TransactionNotFound,
 )
 from web3.types import BlockData, ChecksumAddress
@@ -35,14 +44,26 @@ logger = logging.getLogger(__name__)
 
 # Exceptions that should trigger a retry to a different RPC provider
 RPC_FAILOVER_EXCEPTIONS = (
+    # HTTP/Network layer
     ConnectionError,
     HTTPError,
     Timeout,
+    # Web3 RPC layer - existing
     BadFunctionCallOutput,
     BlockNotFound,
     MethodUnavailable,
     MismatchedABI,
     TransactionNotFound,
+    # Web3 RPC layer - added for comprehensive RPC failover
+    TooManyRequests,
+    StaleBlockchain,
+    CannotHandleRequest,
+    RequestTimedOut,
+    ProviderConnectionError,
+    MultipleFailedRequests,
+    TransactionIndexingInProgress,
+    BlockNumberOutOfRange,
+    PersistentConnectionError,
 )
 
 

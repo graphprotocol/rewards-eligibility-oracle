@@ -12,7 +12,12 @@ from pytest_mock import MockerFixture
 from web3 import Web3
 from web3.exceptions import TransactionNotFound
 
-from src.models.blockchain_client import BlockchainClient, KeyValidationError
+from src.models.blockchain_client import (
+    BlockchainClient,
+    KeyValidationError,
+    NonceError,
+    TransactionRevertedError,
+)
 
 # Mock constants
 MOCK_RPC_PROVIDERS = ["http://primary-rpc.com", "http://secondary-rpc.com"]
@@ -606,7 +611,7 @@ class TestTransactionLogic:
 
     def test_send_signed_transaction_fails_if_reverted(self, blockchain_client: BlockchainClient):
         """
-        Tests that an exception is raised if the transaction is reverted on-chain.
+        Tests that TransactionRevertedError is raised if the transaction is reverted on-chain.
         """
         # Arrange
         mock_signed_tx = MagicMock()
@@ -618,14 +623,16 @@ class TestTransactionLogic:
 
         # Act & Assert
         with pytest.raises(
-            Exception, match=f"Transaction failed: {MOCK_BLOCK_EXPLORER_URL}/tx/0x{mock_tx_hash.hex()}"
+            TransactionRevertedError,
+            match=f"Transaction reverted: {MOCK_BLOCK_EXPLORER_URL}/tx/0x{mock_tx_hash.hex()}",
         ):
             blockchain_client._send_signed_transaction(mock_signed_tx)
 
 
     def test_send_signed_transaction_fails_on_timeout(self, blockchain_client: BlockchainClient):
         """
-        Tests that an exception is raised if waiting for the transaction receipt times out.
+        Tests that a ConnectionError is raised after all RPC providers fail due to TransactionNotFound.
+        TransactionNotFound is in RPC_FAILOVER_EXCEPTIONS, so it triggers failover to all providers.
         """
         # Arrange
         mock_signed_tx = MagicMock()
@@ -635,10 +642,8 @@ class TestTransactionLogic:
             "Timeout"
         )
 
-        # Act & Assert
-        with pytest.raises(
-            Exception, match="Error sending transaction or waiting for receipt: All RPC providers are unreachable."
-        ):
+        # Act & Assert - TransactionNotFound triggers RPC failover, eventually raising requests.ConnectionError
+        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
             blockchain_client._send_signed_transaction(mock_signed_tx)
 
 
@@ -944,7 +949,7 @@ class TestNonceErrorRpcRotation:
         # First call fails with nonce error, second succeeds
         mock_send = mocker.patch(
             "src.models.blockchain_client.BlockchainClient._send_signed_transaction",
-            side_effect=[Exception("nonce too low: tx: 1 state: 2"), "success_tx_hash"],
+            side_effect=[NonceError("nonce too low: tx: 1 state: 2"), "success_tx_hash"],
         )
         mock_rotate = mocker.patch("src.models.blockchain_client.BlockchainClient._get_next_rpc_provider")
 
@@ -1004,7 +1009,7 @@ class TestNonceErrorRpcRotation:
         )
         mocker.patch(
             "src.models.blockchain_client.BlockchainClient._send_signed_transaction",
-            side_effect=[Exception("nonce too low"), "success_tx_hash"],
+            side_effect=[NonceError("nonce too low"), "success_tx_hash"],
         )
         mocker.patch("src.models.blockchain_client.BlockchainClient._get_next_rpc_provider")
 
@@ -1063,7 +1068,7 @@ class TestNonceErrorRpcRotation:
         # Always fail with nonce error
         mocker.patch(
             "src.models.blockchain_client.BlockchainClient._send_signed_transaction",
-            side_effect=Exception("nonce too low"),
+            side_effect=NonceError("nonce too low"),
         )
         mock_rotate = mocker.patch("src.models.blockchain_client.BlockchainClient._get_next_rpc_provider")
 
@@ -1077,7 +1082,7 @@ class TestNonceErrorRpcRotation:
         }
 
         # Act & Assert
-        with pytest.raises(Exception, match="nonce too low"):
+        with pytest.raises(NonceError, match="nonce too low"):
             blockchain_client._execute_complete_transaction(params)
 
         # Rotation count should equal number of providers minus 1 (original + rotations)

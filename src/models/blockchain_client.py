@@ -67,6 +67,28 @@ RPC_FAILOVER_EXCEPTIONS = (
 )
 
 
+# Error message patterns that indicate nonce-related issues (case-insensitive)
+NONCE_ERROR_PATTERNS = ("nonce too low", "nonce is too low", "invalid nonce")
+
+
+class TransactionError(Exception):
+    """Base exception for transaction-related errors."""
+
+    pass
+
+
+class NonceError(TransactionError):
+    """Raised when a nonce-related error occurs (retryable via RPC rotation)."""
+
+    pass
+
+
+class TransactionRevertedError(TransactionError):
+    """Raised when a transaction reverts due to contract logic (not retryable)."""
+
+    pass
+
+
 class BlockchainClient:
     """Handles all blockchain interactions"""
 
@@ -179,9 +201,8 @@ class BlockchainClient:
         Returns:
             True if the error is nonce-related, False otherwise.
         """
-        nonce_error_patterns = ["nonce too low", "nonce is too low", "invalid nonce"]
         error_lower = error_message.lower()
-        return any(pattern in error_lower for pattern in nonce_error_patterns)
+        return any(pattern in error_lower for pattern in NONCE_ERROR_PATTERNS)
 
 
     def _execute_rpc_call(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
@@ -449,37 +470,42 @@ class BlockchainClient:
 
         Returns:
             The transaction hash as a hex string.
+
+        Raises:
+            TransactionRevertedError: If the transaction reverts (not retryable).
+            NonceError: If a nonce-related error occurs (retryable via RPC rotation).
         """
-        # Try to send the transaction and wait for the receipt
         try:
-            # Send the signed transaction
             tx_hash = self._execute_rpc_call(self.w3.eth.send_raw_transaction, signed_tx.raw_transaction)
             logger.info(f"Transaction sent with hash: 0x{tx_hash.hex()}")
 
-            # Wait for the transaction receipt
             receipt = self._execute_rpc_call(
                 self.w3.eth.wait_for_transaction_receipt, tx_hash, self.tx_timeout_seconds
             )
 
-            # If the transaction was successful, log the success and return the hash
             if receipt["status"] == 1:
                 logger.info(f"Transaction successful: {self.block_explorer_url}/tx/0x{tx_hash.hex()}")
                 return tx_hash.hex()
 
-            # If the transaction failed, handle the error
-            else:
-                error_msg = f"Transaction failed: {self.block_explorer_url}/tx/0x{tx_hash.hex()}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-
-        # If the transaction fails, handle the error
-        except Exception as e:
-            error_msg = f"Error sending transaction or waiting for receipt: {str(e)}"
+            # Transaction reverted - not retryable
+            error_msg = f"Transaction reverted: {self.block_explorer_url}/tx/0x{tx_hash.hex()}"
             logger.error(error_msg)
-            raise Exception(error_msg)
+            raise TransactionRevertedError(error_msg)
 
-        # This part should be unreachable, but it's here for safety.
-        raise Exception("Transaction failed for an unknown reason.")
+        except (TransactionRevertedError, NonceError):
+            # Re-raise typed exceptions as-is
+            raise
+
+        except Exception as e:
+            error_str = str(e)
+            logger.error(f"Error sending transaction: {error_str}")
+
+            # Classify and raise typed exception for nonce errors
+            if self._is_nonce_error(error_str):
+                raise NonceError(error_str) from e
+
+            # Preserve original exception for unclassified errors
+            raise
 
 
     def _execute_complete_transaction(self, params: Dict, rpc_rotation_count: int = 0) -> str:
@@ -571,19 +597,22 @@ class BlockchainClient:
         try:
             return self._send_signed_transaction(signed_tx)
 
-        except Exception as e:
-            # Check if this is a nonce error and we haven't exhausted RPC rotations
-            if self._is_nonce_error(str(e)) and rpc_rotation_count < max_rpc_rotations:
+        except NonceError as e:
+            # Nonce errors are retryable via RPC rotation
+            if rpc_rotation_count < max_rpc_rotations:
                 logger.warning(
                     f"Nonce error detected (attempt {rpc_rotation_count + 1}/{max_rpc_rotations + 1}): {e}. "
                     f"Rotating RPC provider and retrying with fresh nonce."
                 )
                 self._get_next_rpc_provider()
 
-                # Re-execute with new provider to fetch fresh nonce
                 return self._execute_complete_transaction(params, rpc_rotation_count + 1)
 
-            # Non-nonce error or rotations exhausted - re-raise
+            # Rotations exhausted - re-raise
+            raise
+
+        except TransactionRevertedError:
+            # Contract logic errors are not retryable - propagate immediately
             raise
 
 

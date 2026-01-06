@@ -331,7 +331,7 @@ class BlockchainClient:
         """
         # If we are not replacing a pending transaction, use the next available nonce
         if not replace:
-            nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address)
+            nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "pending")
             logger.info(f"Using next available nonce: {nonce}")
             return nonce
 
@@ -372,7 +372,7 @@ class BlockchainClient:
             logger.warning(f"Could not check nonce gap: {str(e)}")
 
         # Fallback to next available nonce
-        nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address)
+        nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "pending")
         logger.info(f"Using next available nonce: {nonce}")
         return nonce
 

@@ -341,7 +341,8 @@ class TestTransactionLogic:
 
     def test_determine_transaction_nonce_fetches_next_nonce_for_new_tx(self, blockchain_client: BlockchainClient):
         """
-        Tests that the next available nonce is fetched for a new transaction (replace=False).
+        Tests that the next available nonce is fetched for a new transaction (replace=False)
+        using the 'pending' block tag to avoid stale nonce issues.
         """
         # Arrange
         expected_nonce = 10
@@ -352,7 +353,9 @@ class TestTransactionLogic:
 
         # Assert
         assert nonce == expected_nonce
-        blockchain_client.mock_w3_instance.eth.get_transaction_count.assert_called_once_with(MOCK_SENDER_ADDRESS)
+        blockchain_client.mock_w3_instance.eth.get_transaction_count.assert_called_once_with(
+            MOCK_SENDER_ADDRESS, "pending"
+        )
 
 
     def test_determine_transaction_nonce_uses_oldest_pending_for_replacement(

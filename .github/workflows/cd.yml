@@ -140,10 +140,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create tag
+      - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update release-please manifest
+        run: |
+          # Update .release-please-manifest.json to keep release-please in sync
+          VERSION="${{ needs.version.outputs.version }}"
+          VERSION_NO_V="${VERSION#v}"
+
+          # Update manifest file (with error handling for missing/invalid file)
+          if ! jq --arg version "$VERSION_NO_V" '.["."] = $version' .release-please-manifest.json > manifest.tmp 2>/dev/null; then
+            echo "Warning: Could not update manifest, creating new one"
+            echo "{\".\": \"$VERSION_NO_V\"}" > manifest.tmp
+          fi
+          mv manifest.tmp .release-please-manifest.json
+
+          # Commit manifest update
+          git add .release-please-manifest.json
+          git commit -m "chore: sync manifest with manual release $VERSION [skip ci]"
+          git push origin main
+
+      - name: Create tag
+        run: |
           git tag ${{ needs.version.outputs.version }}
           git push origin ${{ needs.version.outputs.version }}
 

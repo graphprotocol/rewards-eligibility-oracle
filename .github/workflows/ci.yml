@@ -87,7 +87,8 @@ jobs:
           os.environ['ARBITRUM_API_KEY'] = 'api-key'
           os.environ['ETHERSCAN_API_KEY'] = 'api-key'
           os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '{}'
-          
+          os.environ['OPSGENIE_API_KEY'] = 'api-key'
+
           from src.utils.configuration import ConfigLoader, _validate_config
           
           print('Validating config.toml.example...')

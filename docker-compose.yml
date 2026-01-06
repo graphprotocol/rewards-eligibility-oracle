@@ -36,6 +36,7 @@ services:
       - STUDIO_API_KEY=${STUDIO_API_KEY}
       - STUDIO_DEPLOY_KEY=${STUDIO_DEPLOY_KEY}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - OPSGENIE_API_KEY=${OPSGENIE_API_KEY}
 
     # Block processes from gaining higher privileges/capabilities
     security_opt:

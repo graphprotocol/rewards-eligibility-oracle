@@ -22,6 +22,7 @@ from src.utils.configuration import (
     credential_manager,
     load_config,
 )
+from src.utils.opsgenie import send_opsgenie_alert_safe
 from src.utils.slack_notifier import create_slack_notifier
 
 # Set up basic logging
@@ -57,15 +58,23 @@ def main(run_date_override: date = None):
     if not circuit_breaker.check():
         sys.exit(0)
 
+    opsgenie_api_key = None
+
     try:
         # Configuration and credentials
         config = load_config()
         slack_notifier = create_slack_notifier(config.get("SLACK_WEBHOOK_URL"))
+        opsgenie_api_key = config.get("OPSGENIE_API_KEY")
 
         if slack_notifier:
             logger.info("Slack notifications enabled")
         else:
             logger.info("Slack notifications disabled (no webhook URL configured)")
+
+        if opsgenie_api_key:
+            logger.info("OpsGenie alerting enabled")
+        else:
+            logger.info("OpsGenie alerting disabled (no API key configured)")
 
         credentials = credential_manager.get_google_credentials()
 
@@ -191,6 +200,13 @@ def main(run_date_override: date = None):
                     f"Failed to send Slack failure notification: {slack_e}",
                     exc_info=True,
                 )
+
+        send_opsgenie_alert_safe(
+            api_key=opsgenie_api_key,
+            message=f"Rewards Oracle Failed: {stage}",
+            description=error_msg,
+            priority="P3",
+        )
 
         sys.exit(1)
 

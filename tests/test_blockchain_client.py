@@ -12,7 +12,12 @@ from pytest_mock import MockerFixture
 from web3 import Web3
 from web3.exceptions import TransactionNotFound
 
-from src.models.blockchain_client import BlockchainClient, KeyValidationError
+from src.models.blockchain_client import (
+    BlockchainClient,
+    KeyValidationError,
+    NonceError,
+    TransactionRevertedError,
+)
 
 # Mock constants
 MOCK_RPC_PROVIDERS = ["http://primary-rpc.com", "http://secondary-rpc.com"]
@@ -336,7 +341,8 @@ class TestTransactionLogic:
 
     def test_determine_transaction_nonce_fetches_next_nonce_for_new_tx(self, blockchain_client: BlockchainClient):
         """
-        Tests that the next available nonce is fetched for a new transaction (replace=False).
+        Tests that the next available nonce is fetched for a new transaction (replace=False)
+        using the 'pending' block tag to avoid stale nonce issues.
         """
         # Arrange
         expected_nonce = 10
@@ -347,7 +353,9 @@ class TestTransactionLogic:
 
         # Assert
         assert nonce == expected_nonce
-        blockchain_client.mock_w3_instance.eth.get_transaction_count.assert_called_once_with(MOCK_SENDER_ADDRESS)
+        blockchain_client.mock_w3_instance.eth.get_transaction_count.assert_called_once_with(
+            MOCK_SENDER_ADDRESS, "pending"
+        )
 
 
     def test_determine_transaction_nonce_uses_oldest_pending_for_replacement(
@@ -606,7 +614,7 @@ class TestTransactionLogic:
 
     def test_send_signed_transaction_fails_if_reverted(self, blockchain_client: BlockchainClient):
         """
-        Tests that an exception is raised if the transaction is reverted on-chain.
+        Tests that TransactionRevertedError is raised if the transaction is reverted on-chain.
         """
         # Arrange
         mock_signed_tx = MagicMock()
@@ -618,14 +626,16 @@ class TestTransactionLogic:
 
         # Act & Assert
         with pytest.raises(
-            Exception, match=f"Transaction failed: {MOCK_BLOCK_EXPLORER_URL}/tx/0x{mock_tx_hash.hex()}"
+            TransactionRevertedError,
+            match=f"Transaction reverted: {MOCK_BLOCK_EXPLORER_URL}/tx/0x{mock_tx_hash.hex()}",
         ):
             blockchain_client._send_signed_transaction(mock_signed_tx)
 
 
     def test_send_signed_transaction_fails_on_timeout(self, blockchain_client: BlockchainClient):
         """
-        Tests that an exception is raised if waiting for the transaction receipt times out.
+        Tests that a ConnectionError is raised after all RPC providers fail due to TransactionNotFound.
+        TransactionNotFound is in RPC_FAILOVER_EXCEPTIONS, so it triggers failover to all providers.
         """
         # Arrange
         mock_signed_tx = MagicMock()
@@ -635,10 +645,8 @@ class TestTransactionLogic:
             "Timeout"
         )
 
-        # Act & Assert
-        with pytest.raises(
-            Exception, match="Error sending transaction or waiting for receipt: All RPC providers are unreachable."
-        ):
+        # Act & Assert - TransactionNotFound triggers RPC failover, eventually raising requests.ConnectionError
+        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
             blockchain_client._send_signed_transaction(mock_signed_tx)
 
 
@@ -886,3 +894,257 @@ class TestOrchestrationAndBatching:
         assert tx_hashes == []
         assert rpc_provider in blockchain_client.rpc_providers
         blockchain_client.send_transaction_to_renew_indexer_rewards_eligibility.assert_not_called()
+
+
+class TestNonceErrorRpcRotation:
+    """Tests for RPC provider rotation when nonce errors occur."""
+
+
+    def test_is_nonce_error_detects_nonce_too_low(self, blockchain_client: BlockchainClient):
+        """
+        Tests that _is_nonce_error correctly identifies 'nonce too low' error messages.
+        """
+        # Arrange & Act & Assert
+        assert blockchain_client._is_nonce_error("nonce too low: tx: 447 state: 448") is True
+        assert blockchain_client._is_nonce_error("Nonce Too Low") is True
+        assert blockchain_client._is_nonce_error("invalid nonce") is True
+        assert blockchain_client._is_nonce_error("nonce is too low") is True
+        assert blockchain_client._is_nonce_error("insufficient funds") is False
+        assert blockchain_client._is_nonce_error("connection timeout") is False
+
+
+    def test_rpc_rotation_triggers_on_nonce_too_low_error(
+        self, blockchain_client: BlockchainClient, mocker: MockerFixture
+    ):
+        """
+        Tests that RPC rotation is triggered when a 'nonce too low' error occurs
+        during transaction sending.
+        """
+        # Arrange
+        contract_function_name = "allow"
+        blockchain_client.contract.functions.allow = MagicMock()
+
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._setup_transaction_account",
+            return_value=(MOCK_SENDER_ADDRESS, MOCK_PRIVATE_KEY),
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._estimate_transaction_gas",
+            return_value=21000,
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._determine_transaction_nonce",
+            return_value=1,
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._get_gas_prices",
+            return_value=(100, 10),
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._build_transaction_params",
+            return_value={"tx": "params"},
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._build_and_sign_transaction",
+            return_value="signed_tx",
+        )
+
+        # First call fails with nonce error, second succeeds
+        mock_send = mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._send_signed_transaction",
+            side_effect=[NonceError("nonce too low: tx: 1 state: 2"), "success_tx_hash"],
+        )
+        mock_rotate = mocker.patch("src.models.blockchain_client.BlockchainClient._get_next_rpc_provider")
+
+        params = {
+            "private_key": MOCK_PRIVATE_KEY,
+            "indexer_addresses": [MOCK_SENDER_ADDRESS],
+            "data_bytes": b"",
+            "contract_function": contract_function_name,
+            "chain_id": MOCK_CHAIN_ID,
+            "replace": False,
+        }
+
+        # Act
+        result = blockchain_client._execute_complete_transaction(params)
+
+        # Assert
+        assert result == "success_tx_hash"
+        mock_rotate.assert_called_once()
+        assert mock_send.call_count == 2
+
+
+    def test_fresh_nonce_fetched_after_rpc_rotation(
+        self, blockchain_client: BlockchainClient, mocker: MockerFixture
+    ):
+        """
+        Tests that a fresh nonce is fetched from the new RPC provider after rotation.
+        """
+        # Arrange
+        contract_function_name = "allow"
+        blockchain_client.contract.functions.allow = MagicMock()
+
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._setup_transaction_account",
+            return_value=(MOCK_SENDER_ADDRESS, MOCK_PRIVATE_KEY),
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._estimate_transaction_gas",
+            return_value=21000,
+        )
+
+        # Track nonce determination calls - should be called twice (once per attempt)
+        mock_nonce = mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._determine_transaction_nonce",
+            return_value=1,
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._get_gas_prices",
+            return_value=(100, 10),
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._build_transaction_params",
+            return_value={"tx": "params"},
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._build_and_sign_transaction",
+            return_value="signed_tx",
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._send_signed_transaction",
+            side_effect=[NonceError("nonce too low"), "success_tx_hash"],
+        )
+        mocker.patch("src.models.blockchain_client.BlockchainClient._get_next_rpc_provider")
+
+        params = {
+            "private_key": MOCK_PRIVATE_KEY,
+            "indexer_addresses": [MOCK_SENDER_ADDRESS],
+            "data_bytes": b"",
+            "contract_function": contract_function_name,
+            "chain_id": MOCK_CHAIN_ID,
+            "replace": False,
+        }
+
+        # Act
+        blockchain_client._execute_complete_transaction(params)
+
+        # Assert - nonce should be determined twice (fresh nonce on retry)
+        assert mock_nonce.call_count == 2
+
+
+    def test_max_rotation_limit_prevents_infinite_loop(
+        self, blockchain_client: BlockchainClient, mocker: MockerFixture
+    ):
+        """
+        Tests that the maximum rotation limit prevents infinite RPC rotation loops.
+        The limit should match the number of configured RPC providers.
+        """
+        # Arrange
+        contract_function_name = "allow"
+        blockchain_client.contract.functions.allow = MagicMock()
+
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._setup_transaction_account",
+            return_value=(MOCK_SENDER_ADDRESS, MOCK_PRIVATE_KEY),
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._estimate_transaction_gas",
+            return_value=21000,
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._determine_transaction_nonce",
+            return_value=1,
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._get_gas_prices",
+            return_value=(100, 10),
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._build_transaction_params",
+            return_value={"tx": "params"},
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._build_and_sign_transaction",
+            return_value="signed_tx",
+        )
+
+        # Always fail with nonce error
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._send_signed_transaction",
+            side_effect=NonceError("nonce too low"),
+        )
+        mock_rotate = mocker.patch("src.models.blockchain_client.BlockchainClient._get_next_rpc_provider")
+
+        params = {
+            "private_key": MOCK_PRIVATE_KEY,
+            "indexer_addresses": [MOCK_SENDER_ADDRESS],
+            "data_bytes": b"",
+            "contract_function": contract_function_name,
+            "chain_id": MOCK_CHAIN_ID,
+            "replace": False,
+        }
+
+        # Act & Assert
+        with pytest.raises(NonceError, match="nonce too low"):
+            blockchain_client._execute_complete_transaction(params)
+
+        # Rotation count should equal number of providers minus 1 (original + rotations)
+        expected_rotations = len(blockchain_client.rpc_providers) - 1
+        assert mock_rotate.call_count == expected_rotations
+
+
+    def test_non_nonce_errors_do_not_trigger_rotation(
+        self, blockchain_client: BlockchainClient, mocker: MockerFixture
+    ):
+        """
+        Tests that non-nonce errors are raised immediately without triggering RPC rotation.
+        """
+        # Arrange
+        contract_function_name = "allow"
+        blockchain_client.contract.functions.allow = MagicMock()
+
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._setup_transaction_account",
+            return_value=(MOCK_SENDER_ADDRESS, MOCK_PRIVATE_KEY),
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._estimate_transaction_gas",
+            return_value=21000,
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._determine_transaction_nonce",
+            return_value=1,
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._get_gas_prices",
+            return_value=(100, 10),
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._build_transaction_params",
+            return_value={"tx": "params"},
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._build_and_sign_transaction",
+            return_value="signed_tx",
+        )
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._send_signed_transaction",
+            side_effect=Exception("insufficient funds for gas"),
+        )
+        mock_rotate = mocker.patch("src.models.blockchain_client.BlockchainClient._get_next_rpc_provider")
+
+        params = {
+            "private_key": MOCK_PRIVATE_KEY,
+            "indexer_addresses": [MOCK_SENDER_ADDRESS],
+            "data_bytes": b"",
+            "contract_function": contract_function_name,
+            "chain_id": MOCK_CHAIN_ID,
+            "replace": False,
+        }
+
+        # Act & Assert
+        with pytest.raises(Exception, match="insufficient funds for gas"):
+            blockchain_client._execute_complete_transaction(params)
+
+        # No rotation should occur for non-nonce errors
+        mock_rotate.assert_not_called()

@@ -47,6 +47,11 @@ spec:
             secretKeyRef:
               name: rewards-eligibility-oracle-secrets
               key: slack-webhook-url
+        - name: OPSGENIE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rewards-eligibility-oracle-secrets
+              key: opsgenie-api-key
         volumeMounts:
         - name: config-volume
           mountPath: /app/config.toml

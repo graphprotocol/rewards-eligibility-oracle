@@ -49,7 +49,7 @@ def main(run_date_override: date = None):
     circuit_breaker_log = project_root_path / "data" / "circuit_breaker.log"
     circuit_breaker = CircuitBreaker(
         failure_threshold=3,
-        window_minutes=60,
+        window_minutes=720,
         log_file=circuit_breaker_log,
     )
 

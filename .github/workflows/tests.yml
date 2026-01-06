@@ -1,3 +1,6 @@
+# Runs unit tests with coverage and integration tests on PRs and main branch pushes.
+# Required check for PR merges.
+
 name: Tests
 
 on:

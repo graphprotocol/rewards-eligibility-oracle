@@ -1,3 +1,7 @@
+# Manages automated releases via release-please. On main branch pushes, first syncs
+# the release manifest with git tags (via sync-manifest action), then creates/updates
+# a Release PR with CHANGELOG and version bumps. Merging the Release PR triggers cd.yml.
+
 name: Release Please
 
 on:

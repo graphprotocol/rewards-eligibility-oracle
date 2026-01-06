@@ -299,13 +299,13 @@ class TestTransactionLogic:
                 blockchain_client._setup_transaction_account("any-key")
 
 
-    def test_estimate_transaction_gas_succeeds_and_adds_buffer(self, blockchain_client: BlockchainClient):
+    def test_estimate_transaction_gas_applies_floor_for_low_estimates(self, blockchain_client: BlockchainClient):
         """
-        Tests that _estimate_transaction_gas correctly estimates gas and adds a 25% buffer.
+        Tests that _estimate_transaction_gas applies the floor (750k) when estimate is low.
+        With estimate=100k, 2x buffer=200k, but floor=750k wins.
         """
         # Arrange
         mock_contract_func = MagicMock()
-        # The call chain is contract_func().estimate_gas()
         mock_contract_func.return_value.estimate_gas.return_value = 100_000
 
         # Act
@@ -316,9 +316,55 @@ class TestTransactionLogic:
             sender_address=MOCK_SENDER_ADDRESS,
         )
 
-        # Assert
-        assert gas_limit == 125_000  # 100_000 * 1.25
+        # Assert: floor of 750k applied since 2x buffer (200k) < floor
+        assert gas_limit == 750_000
         mock_contract_func.return_value.estimate_gas.assert_called_once_with({"from": MOCK_SENDER_ADDRESS})
+
+
+    def test_estimate_transaction_gas_applies_buffer_for_medium_estimates(
+        self, blockchain_client: BlockchainClient
+    ):
+        """
+        Tests that _estimate_transaction_gas applies 2x buffer when within bounds.
+        With estimate=500k, 2x buffer=1M, floor=750k, ceiling=1.25M, so 1M wins.
+        """
+        # Arrange
+        mock_contract_func = MagicMock()
+        mock_contract_func.return_value.estimate_gas.return_value = 500_000
+
+        # Act
+        gas_limit = blockchain_client._estimate_transaction_gas(
+            contract_func=mock_contract_func,
+            indexer_addresses=[],
+            data_bytes=b"",
+            sender_address=MOCK_SENDER_ADDRESS,
+        )
+
+        # Assert: 2x buffer (1M) is between floor (750k) and ceiling (1.25M)
+        assert gas_limit == 1_000_000
+
+
+    def test_estimate_transaction_gas_applies_ceiling_for_high_estimates(
+        self, blockchain_client: BlockchainClient
+    ):
+        """
+        Tests that _estimate_transaction_gas applies ceiling when 2x buffer exceeds it.
+        With estimate=1M, 2x buffer=2M, ceiling=1.75M, so ceiling wins.
+        """
+        # Arrange
+        mock_contract_func = MagicMock()
+        mock_contract_func.return_value.estimate_gas.return_value = 1_000_000
+
+        # Act
+        gas_limit = blockchain_client._estimate_transaction_gas(
+            contract_func=mock_contract_func,
+            indexer_addresses=[],
+            data_bytes=b"",
+            sender_address=MOCK_SENDER_ADDRESS,
+        )
+
+        # Assert: ceiling (1.75M) applied since 2x buffer (2M) > ceiling
+        assert gas_limit == 1_750_000
 
 
     def test_estimate_transaction_gas_fails_on_rpc_error(self, blockchain_client: BlockchainClient):

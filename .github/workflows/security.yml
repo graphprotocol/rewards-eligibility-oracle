@@ -1,3 +1,7 @@
+# Scans for security vulnerabilities: dependency scanning (safety), code analysis
+# (bandit), secrets detection (trufflehog), and Docker image scanning (trivy).
+# Runs on PRs, main pushes, and daily at 02:00 UTC. Advisory only, does not block merges.
+
 name: Security Scanning
 
 on:

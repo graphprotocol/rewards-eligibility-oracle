@@ -1,7 +1,8 @@
-name: Sync Release Manifest
+# Auto-heals release-please manifest drift from git tags. Runs daily at 00:00 UTC
+# and via manual trigger. Pushes corrections directly to main. Serves as fallback
+# when sync in release-please.yml cannot push due to branch protection.
 
-# Auto-heal release-please manifest if it drifts from actual tags
-# Runs daily and can be triggered manually
+name: Sync Release Manifest
 
 on:
   schedule:

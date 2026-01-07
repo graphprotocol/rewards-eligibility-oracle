@@ -1,3 +1,7 @@
+# Validates code quality on PRs and main branch pushes. Runs linting (ruff), type
+# checking (mypy), syntax validation, config validation, and Docker build verification.
+# Required check for PR merges.
+
 name: CI
 
 on:

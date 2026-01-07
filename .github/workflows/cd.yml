@@ -1,3 +1,7 @@
+# Builds and releases Docker images. Triggered by version tags (from release-please)
+# or manual workflow dispatch for hotfixes. Builds multi-arch images (amd64/arm64),
+# pushes to GHCR, and creates GitHub releases for manual runs.
+
 name: CD - Build and Release
 
 on:

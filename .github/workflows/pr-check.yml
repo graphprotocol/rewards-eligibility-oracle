@@ -1,3 +1,6 @@
+# Validates PR metadata (title/body not empty), analyzes changed files, and checks
+# for merge conflicts. Required check for PR merges.
+
 name: PR Check
 
 on:

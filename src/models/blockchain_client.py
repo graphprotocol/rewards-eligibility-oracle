@@ -278,6 +278,11 @@ class BlockchainClient:
             logger.error(f"Failed to retrieve account from private key: {str(e)}")
             raise
 
+    # Gas estimation constants
+    GAS_BUFFER_MULTIPLIER = 2.0  # 100% buffer
+    GAS_FLOOR = 750_000  # Minimum gas limit
+    GAS_MAX_ADDITION = 750_000  # Maximum gas above estimate
+
 
     def _estimate_transaction_gas(
         self,
@@ -287,19 +292,20 @@ class BlockchainClient:
         sender_address: ChecksumAddress,
     ) -> int:
         """
-        Estimate gas for the transaction with 25% buffer.
+        Estimate gas for the transaction with safety bounds.
+
+        Uses 100% buffer on the estimate, with a floor of 750k and ceiling of estimate + 750k.
+        This protects against stale RPC gas estimates that can cause out-of-gas reverts.
 
         Args:
-            w3: Web3 instance
             contract_func: Contract function to call
             indexer_addresses: List of indexer addresses
             data_bytes: Data bytes for the transaction
             sender_address: Transaction sender address
 
         Returns:
-            int: Estimated gas with 25% buffer
+            int: Estimated gas with safety bounds applied
         """
-        # Try to estimate the gas for the transaction
         try:
 
 
@@ -307,11 +313,15 @@ class BlockchainClient:
                 return contract_func(indexer_addresses, data_bytes).estimate_gas({"from": sender_address})
 
             estimated_gas = self._execute_rpc_call(gas_estimator)
-            gas_limit = int(estimated_gas * 1.25)  # 25% buffer
-            logger.info(f"Estimated gas: {estimated_gas}, with buffer: {gas_limit}")
+
+            # Apply 100% buffer, bounded by floor and ceiling
+            gas_with_buffer = int(estimated_gas * self.GAS_BUFFER_MULTIPLIER)
+            ceiling = estimated_gas + self.GAS_MAX_ADDITION
+            gas_limit = max(self.GAS_FLOOR, min(gas_with_buffer, ceiling))
+
+            logger.info(f"Estimated gas: {estimated_gas}, with bounds applied: {gas_limit}")
             return gas_limit
 
-        # If the gas estimation fails, log the error and raise an exception
         except Exception as e:
             logger.error(f"Gas estimation failed: {str(e)}")
             raise

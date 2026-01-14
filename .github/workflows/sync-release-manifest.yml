@@ -1,6 +1,6 @@
 # Auto-heals release-please manifest drift from git tags. Runs daily at 00:00 UTC
-# and via manual trigger. Pushes corrections directly to main. Serves as fallback
-# when sync in release-please.yml cannot push due to branch protection.
+# and via manual trigger. Creates PR when drift detected. Serves as fallback
+# when sync in release-please.yml misses drift.
 
 name: Sync Release Manifest
 
@@ -10,12 +10,14 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch: # Allow manual trigger
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   sync-manifest:
     name: Sync Manifest with Git Tags
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v5

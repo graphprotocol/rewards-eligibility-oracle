@@ -35,4 +35,18 @@ jobs:
     # Run even if sync-manifest was skipped (bot commits)
     if: always() && (needs.sync-manifest.result == 'success' || needs.sync-manifest.result == 'skipped')
     steps:
+      - name: Check for open sync PRs
+        id: check-sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SYNC_PR=$(gh pr list --repo ${{ github.repository }} --search "sync release-please manifest in:title" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$SYNC_PR" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Skipping release-please - manifest sync PR #$SYNC_PR is open. Merge it first."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - uses: google-github-actions/release-please-action@v4
+        if: steps.check-sync.outputs.skip != 'true'

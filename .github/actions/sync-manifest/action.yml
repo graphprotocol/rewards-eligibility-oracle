@@ -96,15 +96,16 @@ runs:
         git commit -m "chore: sync manifest to $VERSION (was $OLD_VERSION)"
         git push -u origin "$BRANCH"
 
-        # Create PR
+        # Create PR body using printf to avoid YAML parsing issues with markdown
+        PR_BODY=$(printf '%s\n\n%s\n%s\n\n%s' \
+          "Auto-generated PR to sync release-please manifest with git tags." \
+          "- **Previous version:** $OLD_VERSION" \
+          "- **Target version:** $VERSION" \
+          "This PR was created because the manifest version fell behind the latest git tag, likely due to a manual release.")
+
         gh pr create \
           --title "chore: sync release-please manifest to $VERSION" \
-          --body "Auto-generated PR to sync release-please manifest with git tags.
-
-- **Previous version:** $OLD_VERSION
-- **Target version:** $VERSION
-
-This PR was created because the manifest version fell behind the latest git tag, likely due to a manual release." \
+          --body "$PR_BODY" \
           --base main \
           --head "$BRANCH"
 

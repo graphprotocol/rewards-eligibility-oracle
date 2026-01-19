@@ -2,7 +2,7 @@
 # Requires Python 3.9+
 
 # Configuration management
-tomli==2.3.0
+tomli==2.4.0
 
 # Scheduling and resilience
 schedule==1.2.2
@@ -10,13 +10,13 @@ pytz==2025.2
 tenacity==9.1.2
 
 # Google Cloud BigQuery for data processing
-google-cloud-bigquery==3.39.0
+google-cloud-bigquery==3.40.0
 bigframes==2.32.0
 
 # Data processing and validation
 pandas==2.3.3
-pandera==0.28.0
-numpy==2.4.0
+pandera==0.28.1
+numpy==2.4.1
 
 # Blockchain integration - Latest compatible versions
 web3==7.14.0
@@ -40,4 +40,4 @@ types-pytz==2025.2.0.20251108
 types-requests==2.32.4.20250913
 
 # Linting and formatting
-ruff==0.14.10
+ruff==0.14.13

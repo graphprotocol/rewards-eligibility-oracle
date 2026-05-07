@@ -60,8 +60,8 @@ runs:
           echo "Manifest is in sync with tags"
         fi
 
-    - name: Update manifest if drifted
-      id: update
+    - name: Prepare manifest update
+      id: prepare
       if: steps.check.outputs.drift == 'true' && inputs.auto-commit == 'true'
       shell: bash
       env:
@@ -71,32 +71,52 @@ runs:
         OLD_VERSION="${{ steps.check.outputs.manifest_version }}"
         BRANCH="chore/sync-manifest-to-${VERSION}"
 
-        # Check if PR already exists for this sync
+        # Skip if a sync PR for this version already exists
         EXISTING_PR=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || echo "")
         if [ -n "$EXISTING_PR" ]; then
           echo "PR #$EXISTING_PR already exists for this manifest sync"
-          echo "synced=false" >> $GITHUB_OUTPUT
+          echo "should_sync=false" >> $GITHUB_OUTPUT
           exit 0
         fi
 
-        # Update manifest
+        # Write updated manifest to disk; the next step commits it via the GitHub API
         if ! jq --arg version "$VERSION" '.["."] = $version' .release-please-manifest.json > manifest.tmp 2>/dev/null; then
           echo "Warning: Could not update manifest, creating new one"
           echo "{\".\": \"$VERSION\"}" > manifest.tmp
         fi
         mv manifest.tmp .release-please-manifest.json
 
-        # Configure git
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
+        echo "should_sync=true" >> $GITHUB_OUTPUT
+        echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "old_version=$OLD_VERSION" >> $GITHUB_OUTPUT
 
-        # Create branch and commit
-        git checkout -b "$BRANCH"
-        git add .release-please-manifest.json
-        git commit -m "chore: sync manifest to $VERSION (was $OLD_VERSION)"
-        git push -u origin "$BRANCH"
+    # Use the GitHub API to commit, so the commit is verified-signed by github-actions[bot]
+    # and satisfies branch protection rules that require signed commits.
+    - name: Create signed commit via GitHub API
+      if: steps.prepare.outputs.should_sync == 'true'
+      uses: iarekylew00t/verified-bot-commit@b17b2c2fe487f8465872a5f04be8076cbace39a6 # v2
+      with:
+        token: ${{ github.token }}
+        ref: ${{ steps.prepare.outputs.branch }}
+        create-ref: true
+        message: |
+          chore: sync manifest to ${{ steps.prepare.outputs.version }} (was ${{ steps.prepare.outputs.old_version }})
+        files: |
+          .release-please-manifest.json
 
-        # Create PR body using printf to avoid YAML parsing issues with markdown
+    - name: Open sync PR
+      id: update
+      if: steps.prepare.outputs.should_sync == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        VERSION="${{ steps.prepare.outputs.version }}"
+        OLD_VERSION="${{ steps.prepare.outputs.old_version }}"
+        BRANCH="${{ steps.prepare.outputs.branch }}"
+
+        # Build PR body via printf to avoid YAML parsing issues with markdown
         PR_BODY=$(printf '%s\n\n%s\n%s\n\n%s' \
           "Auto-generated PR to sync release-please manifest with git tags." \
           "- **Previous version:** $OLD_VERSION" \

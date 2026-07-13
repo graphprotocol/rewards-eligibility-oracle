@@ -5,6 +5,33 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.10](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.9...v0.4.10) (2026-07-13)
+
+
+### Added
+
+* **ci:** sign sync-manifest commits via GitHub API ([#99](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/99)) ([17f9032](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/17f903259efe63500820a77287522dacfd318bb6))
+
+
+### Fixed
+
+* **ci:** improve sync-manifest to handle branch protection ([#96](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/96)) ([3b191c2](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/3b191c2a72d741d78bf22213fc3b3d3c6456cda8))
+* **ci:** use printf for PR body to avoid YAML parsing error ([#97](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/97)) ([cd07a6d](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/cd07a6df9ded73ef62a28b8a4a6926026a39adb0))
+
+
+### Changed
+
+* **deps:** Bump actions/cache from 5 to 6 ([#118](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/118)) ([e0cde4c](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/e0cde4cd2d18fc472b5d2e427db5bbd61a3e1f4c))
+* **deps:** Bump actions/checkout from 5 to 6 ([#93](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/93)) ([f876bdd](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/f876bdd849a94736d698b56dbea31e97c876cdeb))
+* **deps:** Bump actions/checkout from 6 to 7 ([#117](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/117)) ([5e61119](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/5e611192bbc86422196ce4ad769a477d461473c9))
+* **deps:** Bump docker/build-push-action from 6 to 7 ([#107](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/107)) ([0ebbf6e](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/0ebbf6e3d13817d2f059dfd28a0d2bf99876d607))
+* **deps:** Bump docker/login-action from 3 to 4 ([#105](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/105)) ([90aebf5](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/90aebf5c2ce543dc17fb17cc5f6d0e4c811e0776))
+* **deps:** Bump docker/metadata-action from 5 to 6 ([#106](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/106)) ([34a4c84](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/34a4c8441a3ed7262a045cef69dcdcfa9cd545c7))
+* **deps:** Bump docker/setup-buildx-action from 3 to 4 ([#104](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/104)) ([f05e5d6](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/f05e5d6e2a644c0cec226c593fbce93bb0c6e111))
+* **deps:** Bump softprops/action-gh-release from 2 to 3 ([#112](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/112)) ([bb5d93e](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/bb5d93e17533442c0e61cb4eaf3bd54795d0a965))
+* **release:** sync release-please manifest to actual version 0.4.9 ([#119](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/119)) ([b357318](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/b357318320fdfe590a45da7f8b264085be7426f1))
+* update testnet contract address to new deployment ([#101](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/101)) ([ed9e1eb](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/ed9e1eb6149587623da9f8b5aa15a673ec063bd1))
+
 ## [0.4.5](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.4...v0.4.5) (2025-11-22)
 
 

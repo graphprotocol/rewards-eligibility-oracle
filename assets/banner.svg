@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 190" width="1200" height="190" role="img" aria-label="Comic: a potato indexer farms issuance, the REO terminal denies it, and an astronaut boots it into another galaxy">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#120E2E"/>
+      <stop offset="52%" stop-color="#3A22A6"/>
+      <stop offset="100%" stop-color="#6747ED"/>
+    </linearGradient>
+    <clipPath id="frame"><rect width="1200" height="190" rx="16"/></clipPath>
+    <clipPath id="panel3"><rect x="810" y="16" width="360" height="158" rx="12"/></clipPath>
+  </defs>
+  <rect width="1200" height="190" rx="16" fill="url(#bg)"/>
+  <g clip-path="url(#frame)">
+
+    <!-- ======================= panel 1: farming issuance ======================= -->
+    <rect x="30" y="16" width="360" height="158" rx="12" fill="#FFFFFF" fill-opacity="0.05" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="1.3"/>
+    <g>
+      <!-- pile of GRT -->
+      <g fill="#FFD98A">
+        <ellipse cx="210" cy="126" rx="46" ry="10" fill-opacity="0.35"/>
+        <ellipse cx="196" cy="118" rx="30" ry="8" fill-opacity="0.5"/>
+        <ellipse cx="226" cy="116" rx="24" ry="7" fill-opacity="0.45"/>
+        <path d="M262,100 L263.4,104 L267,105.4 L263.4,106.8 L262,111 L260.6,106.8 L257,105.4 L260.6,104 Z" fill-opacity="0.9"/>
+        <path d="M152,106 L153.2,109.5 L157,110.7 L153.2,111.9 L152,115.5 L150.8,111.9 L147,110.7 L150.8,109.5 Z" fill-opacity="0.9"/>
+      </g>
+      <!-- sleeping potato on top -->
+      <g transform="translate(210,92) rotate(-6)">
+        <path d="M-30,2 C-32,-12 -14,-22 2,-20 C20,-19 32,-8 29,6 C26,18 8,24 -8,21 C-22,19 -28,12 -30,2 Z" fill="#C79A5B" stroke="#7A5A33" stroke-width="2"/>
+        <ellipse cx="-12" cy="-8" rx="2.6" ry="1.8" fill="#8F6A3D" fill-opacity="0.6"/>
+        <ellipse cx="14" cy="5" rx="2.4" ry="1.7" fill="#8F6A3D" fill-opacity="0.6"/>
+        <path d="M-9,-3 Q-6,-6 -3,-3" fill="none" stroke="#3A2A15" stroke-width="1.7" stroke-linecap="round"/>
+        <path d="M3,-3 Q6,-6 9,-3" fill="none" stroke="#3A2A15" stroke-width="1.7" stroke-linecap="round"/>
+        <ellipse cx="0" cy="7" rx="2.6" ry="3.2" fill="none" stroke="#3A2A15" stroke-width="1.5"/>
+      </g>
+      <text x="252" y="62" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#FFFFFF" fill-opacity="0.7">z</text>
+      <text x="262" y="50" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#FFFFFF" fill-opacity="0.55">z</text>
+      <text x="274" y="37" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="19" fill="#FFFFFF" fill-opacity="0.4">z</text>
+      <text x="210" y="160" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#FFFFFF" fill-opacity="0.5">farming issuance · serving nothing</text>
+    </g>
+
+    <!-- ======================= panel 2: the oracle runs the check ======================= -->
+    <rect x="420" y="16" width="360" height="158" rx="12" fill="#FFFFFF" fill-opacity="0.05" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="1.3"/>
+    <g>
+      <!-- the REO console -->
+      <rect x="442" y="34" width="280" height="106" rx="10" fill="#0B0725" fill-opacity="0.92" stroke="#B7A6FF" stroke-opacity="0.4" stroke-width="1.4"/>
+      <line x1="442" y1="58" x2="722" y2="58" stroke="#B7A6FF" stroke-opacity="0.25" stroke-width="1.2"/>
+      <circle cx="459" cy="46" r="3.8" fill="#FFFFFF" fill-opacity="0.22"/>
+      <circle cx="473" cy="46" r="3.8" fill="#FFFFFF" fill-opacity="0.22"/>
+      <circle cx="487" cy="46" r="3.8" fill="#FFFFFF" fill-opacity="0.22"/>
+      <text x="710" y="50" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#B7A6FF" fill-opacity="0.55">reo@oracle:~</text>
+      <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#CFC5FF" fill-opacity="0.85">
+        <text x="458" y="76">$ reo check 0x5b3c…5a3</text>
+        <text x="458" y="94">queries served (28d) ..... 0</text>
+        <text x="458" y="112">service uptime ........... 0%</text>
+        <text x="458" y="130">eligibility ...... <tspan fill="#FFB86B" font-weight="bold">DENIED</tspan><tspan fill="#CFC5FF" fill-opacity="0.5"> ▌</tspan></text>
+      </g>
+      <!-- the potato, reading its own verdict -->
+      <g transform="translate(754,120) rotate(6) scale(0.85)">
+        <path d="M-30,2 C-32,-12 -14,-22 2,-20 C20,-19 32,-8 29,6 C26,18 8,24 -8,21 C-22,19 -28,12 -30,2 Z" fill="#C79A5B" stroke="#7A5A33" stroke-width="2"/>
+        <ellipse cx="-12" cy="-8" rx="2.6" ry="1.8" fill="#8F6A3D" fill-opacity="0.6"/>
+        <ellipse cx="14" cy="6" rx="2.4" ry="1.7" fill="#8F6A3D" fill-opacity="0.6"/>
+        <circle cx="-8" cy="-4" r="1.9" fill="#3A2A15"/>
+        <circle cx="4" cy="-4" r="1.9" fill="#3A2A15"/>
+        <ellipse cx="-2" cy="7" rx="3" ry="3.8" fill="none" stroke="#3A2A15" stroke-width="1.6"/>
+        <path d="M20,-16 q3,-5 0,-8 q-3,3 0,8" fill="#9FD0FF" fill-opacity="0.9"/>
+      </g>
+      <text x="600" y="160" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#FFFFFF" fill-opacity="0.5">the oracle runs the check</text>
+    </g>
+
+    <!-- ======================= panel 3: the verdict, split ======================= -->
+    <rect x="810" y="16" width="360" height="158" rx="12" fill="#FFFFFF" fill-opacity="0.05" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="1.3"/>
+    <g clip-path="url(#panel3)">
+      <!-- dark ineligible side / bright eligible side -->
+      <rect x="810" y="16" width="192" height="158" fill="#0A0620" fill-opacity="0.4"/>
+      <rect x="1002" y="16" width="168" height="158" fill="#B7A6FF" fill-opacity="0.1"/>
+      <line x1="1002" y1="22" x2="1002" y2="168" stroke="#FFFFFF" stroke-opacity="0.45" stroke-width="1.4" stroke-dasharray="6 6"/>
+
+      <!-- eligible constellation behind the astronaut -->
+      <g stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="1.1">
+        <line x1="1052" y1="44" x2="1102" y2="64"/>
+        <line x1="1102" y1="64" x2="1150" y2="40"/>
+        <line x1="1102" y1="64" x2="1128" y2="128"/>
+      </g>
+      <circle cx="1052" cy="44" r="7" fill="#FFFFFF" fill-opacity="0.09"/><circle cx="1052" cy="44" r="3.2" fill="#FFFFFF" fill-opacity="0.95"/>
+      <circle cx="1102" cy="64" r="7" fill="#FFFFFF" fill-opacity="0.09"/><circle cx="1102" cy="64" r="3.2" fill="#FFFFFF" fill-opacity="0.95"/>
+      <circle cx="1150" cy="40" r="7" fill="#FFFFFF" fill-opacity="0.09"/><circle cx="1150" cy="40" r="3.2" fill="#FFFFFF" fill-opacity="0.95"/>
+      <circle cx="1128" cy="128" r="7" fill="#FFFFFF" fill-opacity="0.09"/><circle cx="1128" cy="128" r="3.2" fill="#FFFFFF" fill-opacity="0.95"/>
+      <path d="M1146,96 L1147.4,100 L1151,101.4 L1147.4,102.8 L1146,107 L1144.6,102.8 L1141,101.4 L1144.6,100 Z" fill="#FFD98A" fill-opacity="0.9"/>
+
+      <!-- a distant galaxy, the potato's new home -->
+      <g transform="translate(852,38) scale(1,0.65) rotate(-18)">
+        <circle cx="0" cy="0" r="14" fill="#B7A6FF" fill-opacity="0.12"/>
+        <circle cx="0" cy="0" r="3" fill="#FFFFFF" fill-opacity="0.9"/>
+        <path d="M2,-2 q12,-4 17,7 q3,9 -7,14" fill="none" stroke="#B7A6FF" stroke-opacity="0.7" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M-2,2 q-12,4 -17,-7 q-3,-9 7,-14" fill="none" stroke="#B7A6FF" stroke-opacity="0.7" stroke-width="1.6" stroke-linecap="round"/>
+      </g>
+      <g fill="#FFFFFF">
+        <circle cx="838" cy="72" r="1.1" fill-opacity="0.3"/>
+        <circle cx="884" cy="30" r="1.0" fill-opacity="0.25"/>
+        <circle cx="828" cy="112" r="1.1" fill-opacity="0.25"/>
+      </g>
+
+      <!-- outbound trajectory into the galaxy -->
+      <path d="M886,72 Q870,58 862,46" fill="none" stroke="#FFFFFF" stroke-opacity="0.5" stroke-width="1.4" stroke-dasharray="2 6" stroke-linecap="round"/>
+
+      <!-- the potato, en route to another galaxy -->
+      <g transform="translate(902,80) rotate(-36) scale(0.85)">
+        <path d="M-24,2 C-26,-10 -11,-18 2,-16 C16,-15 26,-6 23,5 C21,15 6,19 -6,17 C-18,15 -22,10 -24,2 Z" fill="#C79A5B" stroke="#7A5A33" stroke-width="1.8"/>
+        <circle cx="-5" cy="-3" r="1.6" fill="#3A2A15"/>
+        <circle cx="5" cy="-3" r="1.6" fill="#3A2A15"/>
+        <ellipse cx="0" cy="6" rx="2.8" ry="3.5" fill="none" stroke="#3A2A15" stroke-width="1.5"/>
+        <path d="M18,-13 q3,-4 0,-7 q-3,2 0,7" fill="#9FD0FF" fill-opacity="0.9"/>
+      </g>
+
+      <!-- impact -->
+      <g stroke="#FFD98A" stroke-width="2" stroke-linecap="round" stroke-opacity="0.9">
+        <line x1="928" y1="92" x2="916" y2="86"/>
+        <line x1="930" y1="103" x2="918" y2="107"/>
+        <line x1="926" y1="81" x2="919" y2="71"/>
+      </g>
+
+      <!-- the REO astronaut, delivering the verdict from the eligible side -->
+      <g transform="translate(1032,96) rotate(-10) scale(0.72)">
+        <rect x="16" y="-34" width="26" height="52" rx="7" fill="#FFFFFF" fill-opacity="0.45"/>
+        <line x1="12" y1="-16" x2="48" y2="-38" stroke="#FFFFFF" stroke-opacity="0.92" stroke-width="12" stroke-linecap="round"/>
+        <circle cx="52" cy="-41" r="7" fill="#FFFFFF" fill-opacity="0.95"/>
+        <line x1="6" y1="24" x2="24" y2="60" stroke="#FFFFFF" stroke-opacity="0.95" stroke-width="13" stroke-linecap="round"/>
+        <rect x="10" y="58" width="32" height="12" rx="6" fill="#FFFFFF" fill-opacity="0.95"/>
+        <rect x="-24" y="-36" width="48" height="66" rx="18" fill="#FFFFFF" fill-opacity="0.95"/>
+        <g stroke="#3A22A6" stroke-width="2.4" stroke-linecap="round" fill="none" stroke-opacity="0.85">
+          <circle cx="-4" cy="-8" r="6.5"/>
+          <line x1="0" y1="-3" x2="4" y2="4"/>
+        </g>
+        <circle cx="4" cy="-16" r="1.8" fill="#3A22A6" fill-opacity="0.85"/>
+        <circle cx="-6" cy="-54" r="23" fill="#FFFFFF" fill-opacity="0.95"/>
+        <circle cx="-12" cy="-54" r="14" fill="#1A1240"/>
+        <path d="M-20,-60 Q-14,-66 -6,-63" fill="none" stroke="#FFFFFF" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"/>
+        <line x1="-16" y1="-14" x2="-52" y2="-2" stroke="#FFFFFF" stroke-opacity="0.92" stroke-width="12" stroke-linecap="round"/>
+        <circle cx="-57" cy="0" r="7" fill="#FFFFFF" fill-opacity="0.95"/>
+        <line x1="-12" y1="22" x2="-58" y2="10" stroke="#FFFFFF" stroke-opacity="0.95" stroke-width="13" stroke-linecap="round"/>
+        <g transform="translate(-64,16) rotate(14) scale(0.55)">
+          <rect x="-82" y="4" width="102" height="17" rx="8" fill="#FFFFFF" fill-opacity="0.95"/>
+          <line x1="-76" y1="5.5" x2="16" y2="5.5" stroke="#3A22A6" stroke-width="1.8" stroke-opacity="0.75"/>
+          <g stroke="#3A22A6" stroke-width="2.4" stroke-linecap="round" stroke-opacity="0.8">
+            <line x1="-62" y1="12" x2="-62" y2="16"/><line x1="-46" y1="12" x2="-46" y2="16"/>
+            <line x1="-30" y1="12" x2="-30" y2="16"/><line x1="-14" y1="12" x2="-14" y2="16"/>
+          </g>
+          <path d="M-16,-40 L18,-40 L18,6 L-64,6 Q-78,6 -78,-6 Q-78,-16 -62,-16 Q-42,-16 -28,-12 Q-17,-10 -16,-24 Z" fill="#FFFFFF" fill-opacity="0.95"/>
+          <path d="M-56,-15 Q-63,-4 -56,5" fill="none" stroke="#3A22A6" stroke-width="2.2" stroke-opacity="0.8" stroke-linecap="round"/>
+          <g fill="none" stroke="#3A22A6" stroke-width="2" stroke-opacity="0.7">
+            <path d="M-15,-21 Q1,-16 17,-21"/><path d="M-15,-29 Q1,-24 17,-29"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- verdict labels -->
+      <text x="826" y="164" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#FFB86B" fill-opacity="0.8">denied</text>
+      <text x="1154" y="164" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" fill="#FFFFFF" fill-opacity="0.6">eligible</text>
+    </g>
+  </g>
+</svg>

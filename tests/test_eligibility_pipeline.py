@@ -3,7 +3,9 @@ Unit tests for the EligibilityPipeline.
 """
 
 import logging
+import os
 import shutil
+import time
 from datetime import date, timedelta
 from pathlib import Path
 from typing import List
@@ -123,6 +125,20 @@ def _assert_output_files(
     pd.testing.assert_frame_equal(raw_df, original_data, check_dtype=False)
     assert sorted(eligible_df["indexer"].tolist()) == sorted(expected_eligible)
     assert sorted(ineligible_df["indexer"].tolist()) == sorted(expected_ineligible)
+
+
+def _stat_raising_for(bad_name: str):
+    """Builds a Path.stat replacement that simulates one specific file disappearing mid-check."""
+    real_stat = Path.stat
+
+
+    def _stat(self: Path, *args, **kwargs):
+        if self.name == bad_name:
+            raise FileNotFoundError(f"simulated race condition for {bad_name}")
+
+        return real_stat(self, *args, **kwargs)
+
+    return _stat
 
 
 # --- Tests for process() ---
@@ -416,3 +432,303 @@ def test_get_directory_size_info_calculates_megabytes_correctly(pipeline: Eligib
     assert info["file_count"] == 1
     assert info["directory_count"] == 0
     assert info["path"] == str(output_dir)
+
+
+# --- Tests for clean_old_date_directories() race condition ---
+
+
+def test_clean_old_date_directories_continues_when_rmtree_fails(pipeline: EligibilityPipeline, mocker):
+    """
+    Tests that `clean_old_date_directories` skips a directory whose rmtree
+    fails (e.g. already removed by another process) and still removes the rest.
+    """
+    # Arrange
+    today = date.today()
+    doomed = pipeline.get_date_output_directory(today - timedelta(days=40))
+    also_old = pipeline.get_date_output_directory(today - timedelta(days=35))
+    for d in (doomed, also_old):
+        d.mkdir(parents=True)
+        (d / "dummy_file.txt").touch()
+
+    mocker.patch(
+        "src.models.eligibility_pipeline.shutil.rmtree",
+        side_effect=[OSError("already removed"), None],
+    )
+
+    # Act & Assert: should not raise despite the first rmtree failing
+    pipeline.clean_old_date_directories(max_age_before_deletion=30)
+
+
+# --- Tests for has_existing_processed_data() ---
+
+
+REQUIRED_OUTPUT_FILES = [
+    "eligible_indexers.csv",
+    "indexer_issuance_eligibility_data.csv",
+    "ineligible_indexers.csv",
+]
+
+
+@pytest.mark.parametrize(
+    "files_to_create, expected_result",
+    [
+        ([], False),
+        (["eligible_indexers.csv"], False),
+        (REQUIRED_OUTPUT_FILES, True),
+    ],
+    ids=["missing_directory", "missing_some_files", "all_files_present"],
+)
+def test_has_existing_processed_data_checks_completeness(
+    pipeline: EligibilityPipeline, files_to_create: List[str], expected_result: bool
+):
+    """
+    Tests that `has_existing_processed_data` returns True only when the
+    date directory exists and all required, non-empty files are present.
+    """
+    # Arrange
+    current_date_val = date.today()
+    if files_to_create:
+        output_dir = pipeline.get_date_output_directory(current_date_val)
+        output_dir.mkdir(parents=True)
+        for name in files_to_create:
+            (output_dir / name).write_text("data")
+
+    # Act & Assert
+    assert pipeline.has_existing_processed_data(current_date_val) is expected_result
+
+
+def test_has_existing_processed_data_returns_false_for_empty_file(pipeline: EligibilityPipeline):
+    """
+    Tests that `has_existing_processed_data` treats a present-but-empty
+    required file as missing data.
+    """
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    for name in REQUIRED_OUTPUT_FILES:
+        (output_dir / name).touch()
+
+    # Act & Assert
+    assert pipeline.has_existing_processed_data(current_date_val) is False
+
+
+def test_has_existing_processed_data_handles_file_disappearing_mid_check(pipeline: EligibilityPipeline, mocker):
+    """
+    Tests that `has_existing_processed_data` returns False, rather than
+    raising, when a file vanishes between the exists() and stat() calls.
+    """
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    for name in REQUIRED_OUTPUT_FILES:
+        (output_dir / name).write_text("data")
+
+    mocker.patch.object(Path, "stat", _stat_raising_for("eligible_indexers.csv"))
+
+    # Act & Assert
+    assert pipeline.has_existing_processed_data(current_date_val) is False
+
+
+# --- Tests for get_data_age_minutes() ---
+
+
+def test_get_data_age_minutes_raises_when_directory_missing(pipeline: EligibilityPipeline):
+    """Tests that `get_data_age_minutes` raises FileNotFoundError when the date directory doesn't exist."""
+    # Act & Assert
+    with pytest.raises(FileNotFoundError, match="No data directory found"):
+        pipeline.get_data_age_minutes(date.today())
+
+
+def test_get_data_age_minutes_raises_when_no_csv_files(pipeline: EligibilityPipeline):
+    """Tests that `get_data_age_minutes` raises FileNotFoundError when the directory has no CSV files."""
+    # Arrange
+    output_dir = pipeline.get_date_output_directory(date.today())
+    output_dir.mkdir(parents=True)
+    (output_dir / "notes.txt").touch()
+
+    # Act & Assert
+    with pytest.raises(FileNotFoundError, match="No CSV files found"):
+        pipeline.get_data_age_minutes(date.today())
+
+
+def test_get_data_age_minutes_uses_oldest_file(pipeline: EligibilityPipeline):
+    """
+    Tests that `get_data_age_minutes` calculates age from the oldest CSV
+    file, not the newest, to be conservative about freshness.
+    """
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    older, newer = output_dir / "older.csv", output_dir / "newer.csv"
+    older.write_text("data")
+    newer.write_text("data")
+    ten_minutes_ago = time.time() - 600
+    os.utime(older, (ten_minutes_ago, ten_minutes_ago))
+
+    # Act
+    age = pipeline.get_data_age_minutes(current_date_val)
+
+    # Assert
+    assert age == pytest.approx(10.0, abs=0.1)
+
+
+def test_get_data_age_minutes_skips_files_that_disappear(pipeline: EligibilityPipeline, mocker):
+    """
+    Tests that `get_data_age_minutes` skips a file that vanishes between
+    glob() and stat(), still computing age from the remaining files.
+    """
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    (output_dir / "stable.csv").write_text("data")
+    (output_dir / "flaky.csv").write_text("data")
+
+    mocker.patch.object(Path, "stat", _stat_raising_for("flaky.csv"))
+
+    # Act & Assert
+    assert pipeline.get_data_age_minutes(current_date_val) >= 0
+
+
+def test_get_data_age_minutes_raises_when_all_files_disappear(pipeline: EligibilityPipeline, mocker):
+    """
+    Tests that `get_data_age_minutes` raises FileNotFoundError when every
+    CSV file vanishes during the age calculation.
+    """
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    (output_dir / "a.csv").write_text("data")
+
+    mocker.patch.object(Path, "stat", side_effect=FileNotFoundError("vanished"))
+
+    # Act & Assert
+    with pytest.raises(FileNotFoundError, match="All CSV files disappeared"):
+        pipeline.get_data_age_minutes(current_date_val)
+
+
+# --- Tests for has_fresh_processed_data() ---
+
+
+def test_has_fresh_processed_data_returns_false_when_no_existing_data(pipeline: EligibilityPipeline):
+    """Tests that `has_fresh_processed_data` short-circuits to False when data doesn't exist yet."""
+    # Act & Assert
+    assert pipeline.has_fresh_processed_data(date.today()) is False
+
+
+def test_has_fresh_processed_data_returns_true_when_recently_written(pipeline: EligibilityPipeline):
+    """Tests that `has_fresh_processed_data` returns True for data written moments ago."""
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    for name in REQUIRED_OUTPUT_FILES:
+        (output_dir / name).write_text("data")
+
+    # Act & Assert
+    assert pipeline.has_fresh_processed_data(current_date_val, max_age_minutes=30) is True
+
+
+@pytest.mark.parametrize(
+    "data_age_minutes, max_age_minutes, expected",
+    [
+        (29.9, 30, True),
+        (30.0, 30, True),
+        (30.1, 30, False),
+    ],
+    ids=["just_within_window", "exactly_at_boundary", "just_past_boundary"],
+)
+def test_has_fresh_processed_data_respects_max_age(
+    pipeline: EligibilityPipeline, mocker, data_age_minutes: float, max_age_minutes: int, expected: bool
+):
+    """
+    Tests that `has_fresh_processed_data` correctly compares data age
+    against the max_age_minutes threshold, including the inclusive boundary.
+    Mocks `get_data_age_minutes` directly to avoid flaky real-clock timing.
+    """
+    # Arrange
+    mocker.patch.object(EligibilityPipeline, "has_existing_processed_data", return_value=True)
+    mocker.patch.object(EligibilityPipeline, "get_data_age_minutes", return_value=data_age_minutes)
+
+    # Act & Assert
+    assert pipeline.has_fresh_processed_data(date.today(), max_age_minutes=max_age_minutes) is expected
+
+
+def test_has_fresh_processed_data_handles_race_condition_gracefully(pipeline: EligibilityPipeline, mocker):
+    """
+    Tests that `has_fresh_processed_data` returns False, rather than
+    raising, if data disappears between the existence check and the age
+    calculation.
+    """
+    # Arrange
+    mocker.patch.object(EligibilityPipeline, "has_existing_processed_data", return_value=True)
+    mocker.patch.object(EligibilityPipeline, "get_data_age_minutes", side_effect=FileNotFoundError("vanished"))
+
+    # Act & Assert
+    assert pipeline.has_fresh_processed_data(date.today()) is False
+
+
+# --- Tests for load_eligible_indexers_from_csv() ---
+
+
+def test_load_eligible_indexers_from_csv_raises_when_missing(pipeline: EligibilityPipeline):
+    """Tests that `load_eligible_indexers_from_csv` raises FileNotFoundError when the CSV doesn't exist."""
+    # Act & Assert
+    with pytest.raises(FileNotFoundError, match="Eligible indexers CSV not found"):
+        pipeline.load_eligible_indexers_from_csv(date.today())
+
+
+def test_load_eligible_indexers_from_csv_returns_addresses(pipeline: EligibilityPipeline):
+    """Tests that `load_eligible_indexers_from_csv` returns the indexer addresses from a valid CSV."""
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    (output_dir / "eligible_indexers.csv").write_text("indexer\n0x1\n0x2\n")
+
+    # Act & Assert
+    assert pipeline.load_eligible_indexers_from_csv(current_date_val) == ["0x1", "0x2"]
+
+
+def test_load_eligible_indexers_from_csv_returns_empty_list_for_header_only(pipeline: EligibilityPipeline):
+    """Tests that `load_eligible_indexers_from_csv` returns an empty list for a header-only CSV."""
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    (output_dir / "eligible_indexers.csv").write_text("indexer\n")
+
+    # Act & Assert
+    assert pipeline.load_eligible_indexers_from_csv(current_date_val) == []
+
+
+def test_load_eligible_indexers_from_csv_raises_when_column_missing(pipeline: EligibilityPipeline):
+    """Tests that `load_eligible_indexers_from_csv` raises ValueError when the 'indexer' column is absent."""
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    (output_dir / "eligible_indexers.csv").write_text("wrong_column\n0x1\n")
+
+    # Act & Assert
+    with pytest.raises(ValueError, match="missing 'indexer' column"):
+        pipeline.load_eligible_indexers_from_csv(current_date_val)
+
+
+def test_load_eligible_indexers_from_csv_wraps_parse_errors(pipeline: EligibilityPipeline, mocker):
+    """Tests that `load_eligible_indexers_from_csv` wraps CSV parsing failures in a ValueError."""
+    # Arrange
+    current_date_val = date.today()
+    output_dir = pipeline.get_date_output_directory(current_date_val)
+    output_dir.mkdir(parents=True)
+    (output_dir / "eligible_indexers.csv").write_text("indexer\n0x1\n")
+
+    mocker.patch("pandas.read_csv", side_effect=pd.errors.ParserError("bad token"))
+
+    # Act & Assert
+    with pytest.raises(ValueError, match="Error reading CSV file"):
+        pipeline.load_eligible_indexers_from_csv(current_date_val)

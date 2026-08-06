@@ -141,6 +141,24 @@ def _stat_raising_for(bad_name: str):
     return _stat
 
 
+def _stat_raising_for_csv_files():
+    """
+    Builds a Path.stat replacement that simulates every *.csv file disappearing
+    mid-check, without affecting directory-level stat() calls (e.g. exists()
+    on newer pathlib implementations, which calls stat() internally).
+    """
+    real_stat = Path.stat
+
+
+    def _stat(self: Path, *args, **kwargs):
+        if self.suffix == ".csv":
+            raise FileNotFoundError("simulated race condition for all csv files")
+
+        return real_stat(self, *args, **kwargs)
+
+    return _stat
+
+
 # --- Tests for process() ---
 
 
@@ -604,7 +622,7 @@ def test_get_data_age_minutes_raises_when_all_files_disappear(pipeline: Eligibil
     output_dir.mkdir(parents=True)
     (output_dir / "a.csv").write_text("data")
 
-    mocker.patch.object(Path, "stat", side_effect=FileNotFoundError("vanished"))
+    mocker.patch.object(Path, "stat", _stat_raising_for_csv_files())
 
     # Act & Assert
     with pytest.raises(FileNotFoundError, match="All CSV files disappeared"):

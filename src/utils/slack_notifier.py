@@ -14,19 +14,45 @@ from src.utils.retry_decorator import retry_with_backoff
 # Module-level logger
 logger = logging.getLogger(__name__)
 
+# Prefixes that tell readers which network a notification came from, keyed by the chain the oracle posts to
+NETWORK_LABELS = {
+    42161: "[MAINNET] :large_green_circle:",
+    421614: "[TESTNET] :large_brown_circle:",
+}
+
+
+def get_network_label(chain_id: Optional[int]) -> str:
+    """
+    Get the prefix that identifies which network a notification is about, empty if the chain is unknown.
+    """
+    # Without a chain we cannot say which network the message is about, so send it unlabelled
+    if chain_id is None:
+        logger.debug("No chain ID available - Slack notifications will not be labelled with a network")
+        return ""
+
+    label = NETWORK_LABELS.get(chain_id)
+
+    # Fall back to the raw chain ID so an unrecognised network is still visible rather than silently unlabelled
+    if label is None:
+        logger.warning(f"No network label defined for chain ID {chain_id} - labelling with the chain ID instead")
+        return f"[CHAIN {chain_id}]"
+
+    return label
+
 
 class SlackNotifier:
     """Simple utility class for sending notifications to Slack via webhooks."""
 
-    def __init__(self, webhook_url: str) -> None:
+    def __init__(self, webhook_url: str, chain_id: Optional[int] = None) -> None:
         """
-        Initialize the Slack notifier.
+        Initialize the Slack notifier, labelling every notification with the network the chain ID maps to.
 
         Args:
             webhook_url: The Slack webhook URL to send notifications to.
         """
         self.webhook_url = webhook_url
         self.timeout = 10  # seconds
+        self.network_label = get_network_label(chain_id)
 
 
     @retry_with_backoff(
@@ -69,9 +95,9 @@ class SlackNotifier:
 
 
     def _create_payload(self, text: str, fields: List[Dict], color: str = "good") -> Dict:
-        """Create a Slack message payload."""
+        """Create a Slack message payload, led by the network label so readers can tell the deployments apart."""
         return {
-            "text": text,
+            "text": f"{self.network_label} {text}" if self.network_label else text,
             "attachments": [
                 {
                     "color": color,
@@ -256,20 +282,17 @@ class SlackNotifier:
         return self._send_message(payload)
 
 
-def create_slack_notifier(webhook_url: Optional[str]) -> Optional[SlackNotifier]:
+def create_slack_notifier(webhook_url: Optional[str], chain_id: Optional[int] = None) -> Optional[SlackNotifier]:
     """
-    Factory function to create a SlackNotifier instance.
+    Create a SlackNotifier for the given webhook, or None when no webhook URL is configured.
 
     Args:
-        webhook_url: The Slack webhook URL (can be None)
-
-    Returns:
-        SlackNotifier instance if webhook_url is provided, None otherwise
+        chain_id: The chain the oracle posts to, used to label notifications by network (can be None)
     """
     # If the webhook URL is provided, create a SlackNotifier instance
     if webhook_url and webhook_url.strip():
         try:
-            return SlackNotifier(webhook_url.strip())
+            return SlackNotifier(webhook_url.strip(), chain_id)
 
         # If there is an error when trying to create the SlackNotifier instance, return None
         except Exception as e:

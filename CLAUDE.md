@@ -70,6 +70,8 @@ docker-compose ps
 ```bash
 # Test Slack webhook
 export SLACK_WEBHOOK_URL="your_webhook_url"
+# Optional: label the test messages with a network, e.g. 42161 for mainnet or 421614 for testnet
+export BLOCKCHAIN_CHAIN_ID="421614"
 ./scripts/test_slack_notifications.py
 ```
 

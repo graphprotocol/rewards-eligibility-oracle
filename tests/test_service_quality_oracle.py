@@ -120,7 +120,9 @@ def test_main_succeeds_on_happy_path(oracle_context):
 
     ctx["get_creds"].assert_called_once()
     ctx["load_config"].assert_called_once()
-    ctx["slack"]["create"].assert_called_once_with(MOCK_CONFIG["SLACK_WEBHOOK_URL"])
+    ctx["slack"]["create"].assert_called_once_with(
+        MOCK_CONFIG["SLACK_WEBHOOK_URL"], MOCK_CONFIG["BLOCKCHAIN_CHAIN_ID"]
+    )
 
     ctx["bq_provider_cls"].assert_called_once()
     ctx["bq_provider"].fetch_indexer_issuance_eligibility_data.assert_called_once()

@@ -16,6 +16,7 @@ from src.utils.configuration import ConfigurationError
 MOCK_CONFIG = {
     "SLACK_WEBHOOK_URL": "http://fake.slack.com",
     "SCHEDULED_RUN_TIME": "10:00",
+    "BLOCKCHAIN_CHAIN_ID": 421614,
 }
 
 MOCK_CONFIG_NO_SLACK = {"SCHEDULED_RUN_TIME": "10:00", "SLACK_WEBHOOK_URL": None}
@@ -99,7 +100,9 @@ class TestSchedulerInitialization:
             mock_dependencies.validate.assert_called_once()
             mock_dependencies.creds.get_google_credentials.assert_called_once()
             mock_dependencies.load_config.assert_called_once()
-            mock_dependencies.create_slack.assert_called_once_with(MOCK_CONFIG["SLACK_WEBHOOK_URL"])
+            mock_dependencies.create_slack.assert_called_once_with(
+                MOCK_CONFIG["SLACK_WEBHOOK_URL"], MOCK_CONFIG["BLOCKCHAIN_CHAIN_ID"]
+            )
             mock_dependencies.os.environ.get.assert_any_call("RUN_ON_STARTUP", "false")
             mock_dependencies.schedule.every.return_value.day.at.assert_called_once_with(
                 MOCK_CONFIG["SCHEDULED_RUN_TIME"]
@@ -118,7 +121,8 @@ class TestSchedulerInitialization:
 
         Scheduler()
 
-        mock_dependencies.create_slack.assert_called_once_with(MOCK_CONFIG["SLACK_WEBHOOK_URL"])
+        # Configuration never loaded, so the network is unknown and the notification goes out unlabelled
+        mock_dependencies.create_slack.assert_called_once_with(MOCK_CONFIG["SLACK_WEBHOOK_URL"], None)
         mock_dependencies.slack_notifier.send_failure_notification.assert_called_once()
         mock_dependencies.exit.assert_called_once_with(1)
 
@@ -130,7 +134,8 @@ class TestSchedulerInitialization:
 
         Scheduler()
 
-        mock_dependencies.create_slack.assert_called_once_with(MOCK_CONFIG["SLACK_WEBHOOK_URL"])
+        # Configuration failed to load, so the network is unknown and the notification goes out unlabelled
+        mock_dependencies.create_slack.assert_called_once_with(MOCK_CONFIG["SLACK_WEBHOOK_URL"], None)
         mock_dependencies.slack_notifier.send_failure_notification.assert_called_once()
         mock_dependencies.exit.assert_called_once_with(1)
 

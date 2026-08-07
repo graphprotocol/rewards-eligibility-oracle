@@ -122,7 +122,13 @@ def run_all_tests() -> bool:
         logger.error("SLACK_WEBHOOK_URL environment variable not set. Cannot run tests.")
         return False
 
-    notifier = create_slack_notifier(webhook_url)
+    # Optional, so the test messages carry the same network label a real deployment would send
+    chain_id_env = os.environ.get("BLOCKCHAIN_CHAIN_ID")
+    if chain_id_env and not chain_id_env.isdigit():
+        logger.error(f"BLOCKCHAIN_CHAIN_ID must be a number, got: {chain_id_env}")
+        return False
+
+    notifier = create_slack_notifier(webhook_url, int(chain_id_env) if chain_id_env else None)
     if not notifier:
         logger.error("Failed to create Slack notifier. Check webhook URL or network.")
         return False

@@ -156,6 +156,8 @@ class Scheduler:
     def initialize(self):
         """Initialize the scheduler and validate configuration"""
         logger.info("Initializing scheduler...")
+        config = None
+
         try:
             validate_all_required_env_vars()
 
@@ -175,7 +177,9 @@ class Scheduler:
             config = load_config()
 
             # Create Slack notifier
-            self.slack_notifier = create_slack_notifier(config.get("SLACK_WEBHOOK_URL"))
+            self.slack_notifier = create_slack_notifier(
+                config.get("SLACK_WEBHOOK_URL"), config.get("BLOCKCHAIN_CHAIN_ID")
+            )
             if self.slack_notifier:
                 logger.info("Slack notifications enabled for scheduler")
                 startup_message = (
@@ -212,7 +216,9 @@ class Scheduler:
             if not self.slack_notifier:
                 webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
                 if webhook_url:
-                    self.slack_notifier = create_slack_notifier(webhook_url)
+                    # Config may not have loaded yet, in which case the network stays unknown
+                    chain_id = config.get("BLOCKCHAIN_CHAIN_ID") if config else None
+                    self.slack_notifier = create_slack_notifier(webhook_url, chain_id)
 
             if self.slack_notifier:
                 self.slack_notifier.send_failure_notification(

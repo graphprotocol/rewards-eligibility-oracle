@@ -63,7 +63,7 @@ def main(run_date_override: date = None):
     try:
         # Configuration and credentials
         config = load_config()
-        slack_notifier = create_slack_notifier(config.get("SLACK_WEBHOOK_URL"))
+        slack_notifier = create_slack_notifier(config.get("SLACK_WEBHOOK_URL"), config.get("BLOCKCHAIN_CHAIN_ID"))
         opsgenie_api_key = config.get("OPSGENIE_API_KEY")
 
         if slack_notifier:

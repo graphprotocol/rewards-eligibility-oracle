@@ -11,6 +11,8 @@ from tenacity import wait_fixed
 from src.utils.slack_notifier import SlackNotifier, create_slack_notifier
 
 MOCK_WEBHOOK_URL = "https://hooks.slack.com/services/fake/webhook"
+ARBITRUM_ONE_CHAIN_ID = 42161
+ARBITRUM_SEPOLIA_CHAIN_ID = 421614
 
 
 @pytest.fixture
@@ -41,6 +43,27 @@ def test_create_slack_notifier_returns_none_without_url(url: str):
     """Tests that the factory function returns None if the URL is missing or empty."""
     notifier = create_slack_notifier(url)
     assert notifier is None
+
+
+def test_create_slack_notifier_passes_chain_id_through():
+    """Tests that the factory function labels the notifier with the network of the chain it is given."""
+    notifier = create_slack_notifier(MOCK_WEBHOOK_URL, ARBITRUM_SEPOLIA_CHAIN_ID)
+    assert notifier.network_label == "[TESTNET] :large_brown_circle:"
+
+
+@pytest.mark.parametrize(
+    "chain_id, expected_label",
+    [
+        (ARBITRUM_ONE_CHAIN_ID, "[MAINNET] :large_green_circle:"),
+        (ARBITRUM_SEPOLIA_CHAIN_ID, "[TESTNET] :large_brown_circle:"),
+        (999999, "[CHAIN 999999]"),
+        (None, ""),
+    ],
+)
+def test_network_label_matches_the_chain(chain_id: int, expected_label: str):
+    """Tests that each chain maps to its own label, with unrecognised chains falling back to the chain ID."""
+    notifier = SlackNotifier(MOCK_WEBHOOK_URL, chain_id)
+    assert notifier.network_label == expected_label
 
 
 # 2. Sending Logic Tests
@@ -81,7 +104,7 @@ def test_send_message_retries_on_request_failure(mock_requests: MagicMock):
 
 def test_send_success_notification_builds_correct_payload(mock_requests: MagicMock):
     """Tests that the success notification has the correct structure."""
-    notifier = SlackNotifier(MOCK_WEBHOOK_URL)
+    notifier = SlackNotifier(MOCK_WEBHOOK_URL, ARBITRUM_ONE_CHAIN_ID)
     notifier.send_success_notification(
         eligible_indexers=["0x1"],
         total_processed=10,
@@ -95,7 +118,7 @@ def test_send_success_notification_builds_correct_payload(mock_requests: MagicMo
     payload = call_kwargs["json"]
     attachment = payload["attachments"][0]
 
-    assert payload["text"] == "Rewards Eligibility Oracle - Success"
+    assert payload["text"] == "[MAINNET] :large_green_circle: Rewards Eligibility Oracle - Success"
     assert attachment["color"] == "good"
 
     # Create a map of title to value for easier assertions
@@ -108,14 +131,14 @@ def test_send_success_notification_builds_correct_payload(mock_requests: MagicMo
 
 def test_send_failure_notification_builds_correct_payload(mock_requests: MagicMock):
     """Tests that the failure notification has the correct structure."""
-    notifier = SlackNotifier(MOCK_WEBHOOK_URL)
+    notifier = SlackNotifier(MOCK_WEBHOOK_URL, ARBITRUM_SEPOLIA_CHAIN_ID)
     notifier.send_failure_notification(error_message="Something broke", stage="Test Stage")
 
     call_args, call_kwargs = mock_requests.call_args
     payload = call_kwargs["json"]
     attachment = payload["attachments"][0]
 
-    assert payload["text"] == "Rewards Eligibility Oracle - FAILURE"
+    assert payload["text"] == "[TESTNET] :large_brown_circle: Rewards Eligibility Oracle - FAILURE"
     assert attachment["color"] == "danger"
     fields = {field["title"]: field["value"] for field in attachment["fields"]}
     assert fields["Status"] == "Failed"
@@ -125,14 +148,23 @@ def test_send_failure_notification_builds_correct_payload(mock_requests: MagicMo
 
 def test_send_info_notification_builds_correct_payload(mock_requests: MagicMock):
     """Tests that the info notification has the correct structure."""
-    notifier = SlackNotifier(MOCK_WEBHOOK_URL)
+    notifier = SlackNotifier(MOCK_WEBHOOK_URL, ARBITRUM_SEPOLIA_CHAIN_ID)
     notifier.send_info_notification(message="Just an FYI", title="Friendly Reminder")
 
     call_args, call_kwargs = mock_requests.call_args
     payload = call_kwargs["json"]
     attachment = payload["attachments"][0]
 
-    assert payload["text"] == "Rewards Eligibility Oracle - Friendly Reminder"
+    assert payload["text"] == "[TESTNET] :large_brown_circle: Rewards Eligibility Oracle - Friendly Reminder"
     assert attachment["color"] == "good"  # Default color
     fields = {field["title"]: field["value"] for field in attachment["fields"]}
     assert fields["Message"] == "Just an FYI"
+
+
+def test_notification_is_unlabelled_when_the_chain_is_unknown(mock_requests: MagicMock):
+    """Tests that a notifier without a chain ID sends the message unchanged, with no network prefix."""
+    notifier = SlackNotifier(MOCK_WEBHOOK_URL)
+    notifier.send_info_notification(message="Just an FYI", title="Friendly Reminder")
+
+    call_args, call_kwargs = mock_requests.call_args
+    assert call_kwargs["json"]["text"] == "Rewards Eligibility Oracle - Friendly Reminder"

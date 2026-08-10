@@ -1,7 +1,7 @@
 # Dockerfile to create a clean, lightweight Docker Image for the Rewards Eligibility Oracle
 
 # Use Python 3.13.7 slim as the base image for a lightweight container
-FROM python:3.14.6-slim
+FROM python:3.15.0rc1-slim
 
 # Accept version as build argument
 ARG VERSION=dev

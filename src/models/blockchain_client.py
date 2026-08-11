@@ -196,7 +196,7 @@ class BlockchainClient:
         Execute func(*args, **kwargs) with retries and provider failover, rotating
         through the RPC pool and raising ConnectionError once every provider has failed.
         """
-        initial_index = self.current_rpc_index
+        providers_tried = 0
         while True:
             try:
                 # Add retry logic with backoff for the specific function call
@@ -210,16 +210,18 @@ class BlockchainClient:
 
             # If we get an exception after all retries, log the error and switch to the next RPC provider
             except RPC_FAILOVER_EXCEPTIONS as e:
+                providers_tried += 1
                 current_provider = self.rpc_providers[self.current_rpc_index]
                 logger.warning(
                     f"RPC call failed with provider at index {self.current_rpc_index} ({current_provider}): {e}"
                 )
-                self._get_next_rpc_provider()
 
-                # If we have tried all RPC providers, log the error and raise an exception
-                if self.current_rpc_index == initial_index:
+                # Once every provider in the pool has failed, log the error and raise an exception
+                if providers_tried >= len(self.rpc_providers):
                     logger.error("All RPC providers failed. Cannot proceed.")
                     raise ConnectionError("All RPC providers are unreachable.") from e
+
+                self._get_next_rpc_provider()
 
             # If we get an unexpected exception, log the error and raise the exception
             except Exception as e:

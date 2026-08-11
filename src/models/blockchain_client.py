@@ -32,6 +32,7 @@ from web3.exceptions import (
     TooManyRequests,
     TransactionIndexingInProgress,
     TransactionNotFound,
+    Web3RPCError,
 )
 from web3.types import BlockData, ChecksumAddress
 
@@ -69,6 +70,21 @@ RPC_FAILOVER_EXCEPTIONS = (
 
 # Error message patterns that indicate nonce-related issues (case-insensitive)
 NONCE_ERROR_PATTERNS = ("nonce too low", "nonce is too low", "invalid nonce")
+
+
+# Chain-level JSON-RPC error patterns where switching provider cannot help, since every provider
+# gives the same answer (case-insensitive). Nonce patterns belong here so nonce errors keep
+# propagating to the retry-with-fresh-nonce logic instead of being retried with the same nonce.
+CHAIN_LEVEL_ERROR_PATTERNS = NONCE_ERROR_PATTERNS + (
+    "execution reverted",
+    "already known",
+    "insufficient funds",
+    "transaction underpriced",
+    "intrinsic gas too low",
+    "gas required exceeds",
+    "exceeds block gas limit",
+    "max fee per gas less than block base fee",
+)
 
 
 class TransactionError(Exception):
@@ -210,23 +226,41 @@ class BlockchainClient:
 
             # If we get an exception after all retries, log the error and switch to the next RPC provider
             except RPC_FAILOVER_EXCEPTIONS as e:
-                providers_tried += 1
-                current_provider = self.rpc_providers[self.current_rpc_index]
-                logger.warning(
-                    f"RPC call failed with provider at index {self.current_rpc_index} ({current_provider}): {e}"
-                )
+                providers_tried = self._count_provider_failure_and_rotate(providers_tried, e)
 
-                # Once every provider in the pool has failed, log the error and raise an exception
-                if providers_tried >= len(self.rpc_providers):
-                    logger.error("All RPC providers failed. Cannot proceed.")
-                    raise ConnectionError("All RPC providers are unreachable.") from e
+            # Providers report exhausted quotas, rate limits and auth problems as JSON-RPC errors,
+            # so rotate immediately for those; chain-level errors re-raise since rotation cannot help
+            except Web3RPCError as e:
+                if any(pattern in str(e).lower() for pattern in CHAIN_LEVEL_ERROR_PATTERNS):
+                    logger.error(f"RPC call failed with a chain-level error: {e}")
+                    raise
 
-                self._get_next_rpc_provider()
+                providers_tried = self._count_provider_failure_and_rotate(providers_tried, e)
 
             # If we get an unexpected exception, log the error and raise the exception
             except Exception as e:
                 logger.error(f"An unexpected error occurred during RPC call: {e}")
                 raise
+
+
+    def _count_provider_failure_and_rotate(self, providers_tried: int, error: Exception) -> int:
+        """
+        Record one provider failure and rotate to the next provider, raising
+        ConnectionError once every provider in the pool has failed.
+        """
+        providers_tried += 1
+        current_provider = self.rpc_providers[self.current_rpc_index]
+        logger.warning(
+            f"RPC call failed with provider at index {self.current_rpc_index} ({current_provider}): {error}"
+        )
+
+        # Once every provider in the pool has failed, log the error and raise an exception
+        if providers_tried >= len(self.rpc_providers):
+            logger.error("All RPC providers failed. Cannot proceed.")
+            raise ConnectionError("All RPC providers are unreachable.") from error
+
+        self._get_next_rpc_provider()
+        return providers_tried
 
 
     def _setup_transaction_account(self, private_key: str) -> Tuple[str, str]:

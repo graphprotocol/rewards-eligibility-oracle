@@ -239,6 +239,33 @@ class TestInitializationAndConnection:
         blockchain_client.slack_notifier.send_info_notification.assert_not_called()
 
 
+    def test_execute_rpc_call_raises_after_trying_every_provider_even_if_index_skips(
+        self, blockchain_client: BlockchainClient, mocker: MockerFixture
+    ):
+        """
+        Tests the failover loop terminates once every provider has been tried, even when
+        reconnection skips over an unreachable provider so the RPC index never returns to
+        its starting value. Previously this exact situation looped forever.
+        """
+        # Arrange
+        mocker.patch("tenacity.nap.time")  # Skip retry backoff sleeps
+        mock_func = MagicMock(side_effect=requests.exceptions.ConnectionError("RPC down"))
+
+
+        def rotate_skipping_primary():
+            # Simulate _connect_to_rpc skipping the unreachable primary and landing on the backup
+            blockchain_client.current_rpc_index = 1
+
+        mocker.patch.object(blockchain_client, "_get_next_rpc_provider", side_effect=rotate_skipping_primary)
+
+        # Act & Assert
+        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+            blockchain_client._execute_rpc_call(mock_func)
+
+        # Each of the 2 providers gets 3 retry attempts before the pool is exhausted
+        assert mock_func.call_count == 6
+
+
     def test_init_fails_with_empty_rpc_list(self, mock_w3, mock_slack):
         """
         Tests that BlockchainClient raises an exception if initialized with an empty list of RPC providers.

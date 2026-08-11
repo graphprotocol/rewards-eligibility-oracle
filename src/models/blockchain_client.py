@@ -102,15 +102,9 @@ class BlockchainClient:
         slack_notifier: Optional[SlackNotifier] = None,
     ):
         """
-        Initialize the blockchain client.
-
-        Args:
-            rpc_providers: List of RPC provider URLs
-            contract_address: Smart contract address
-            project_root: Path to project root directory
-            block_explorer_url: Base URL for the block explorer (e.g., https://sepolia.arbiscan.io)
-            tx_timeout_seconds: Seconds to wait for a transaction receipt.
-            slack_notifier: Optional instance of SlackNotifier for sending alerts.
+        Initialize the blockchain client, load the contract ABI and connect to the first
+        reachable provider in rpc_providers. block_explorer_url is the explorer base URL
+        (e.g. https://sepolia.arbiscan.io); tx_timeout_seconds bounds the receipt wait.
         """
         self.rpc_providers = rpc_providers
         self.contract_address = contract_address
@@ -192,35 +186,17 @@ class BlockchainClient:
 
 
     def _is_nonce_error(self, error_message: str) -> bool:
-        """
-        Check if an error message indicates a nonce-related issue.
-
-        Args:
-            error_message: The error message string to check.
-
-        Returns:
-            True if the error is nonce-related, False otherwise.
-        """
+        """Check if an error message indicates a nonce-related issue."""
         error_lower = error_message.lower()
         return any(pattern in error_lower for pattern in NONCE_ERROR_PATTERNS)
 
 
     def _execute_rpc_call(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
         """
-        Execute an RPC call with retry and failover logic.
-
-        Args:
-            func: The Web3 function to execute.
-            *args: Positional arguments for the function.
-            **kwargs: Keyword arguments for the function.
-
-        Returns:
-            The result of the RPC call.
-
-        Raises:
-            ConnectionError: If all RPC providers fail.
+        Execute func(*args, **kwargs) with retries and provider failover, rotating
+        through the RPC pool and raising ConnectionError once every provider has failed.
         """
-        initial_index = self.current_rpc_index
+        providers_tried = 0
         while True:
             try:
                 # Add retry logic with backoff for the specific function call
@@ -234,16 +210,18 @@ class BlockchainClient:
 
             # If we get an exception after all retries, log the error and switch to the next RPC provider
             except RPC_FAILOVER_EXCEPTIONS as e:
+                providers_tried += 1
                 current_provider = self.rpc_providers[self.current_rpc_index]
                 logger.warning(
                     f"RPC call failed with provider at index {self.current_rpc_index} ({current_provider}): {e}"
                 )
-                self._get_next_rpc_provider()
 
-                # If we have tried all RPC providers, log the error and raise an exception
-                if self.current_rpc_index == initial_index:
+                # Once every provider in the pool has failed, log the error and raise an exception
+                if providers_tried >= len(self.rpc_providers):
                     logger.error("All RPC providers failed. Cannot proceed.")
                     raise ConnectionError("All RPC providers are unreachable.") from e
+
+                self._get_next_rpc_provider()
 
             # If we get an unexpected exception, log the error and raise the exception
             except Exception as e:
@@ -253,13 +231,7 @@ class BlockchainClient:
 
     def _setup_transaction_account(self, private_key: str) -> Tuple[str, str]:
         """
-        Validate the private key and return the formatted key and account address.
-
-        Args:
-            private_key: The private key string.
-
-        Returns:
-            A tuple containing the account address and the formatted private key.
+        Validate the private key, returning (account address, formatted key).
 
         Raises:
             KeyValidationError: If the private key is invalid.
@@ -296,15 +268,6 @@ class BlockchainClient:
 
         Uses 100% buffer on the estimate, with a floor of 750k and ceiling of estimate + 750k.
         This protects against stale RPC gas estimates that can cause out-of-gas reverts.
-
-        Args:
-            contract_func: Contract function to call
-            indexer_addresses: List of indexer addresses
-            data_bytes: Data bytes for the transaction
-            sender_address: Transaction sender address
-
-        Returns:
-            int: Estimated gas with safety bounds applied
         """
         try:
 
@@ -329,15 +292,8 @@ class BlockchainClient:
 
     def _determine_transaction_nonce(self, sender_address: ChecksumAddress, replace: bool) -> int:
         """
-        Determine the appropriate nonce for the transaction.
-
-        Args:
-            w3: Web3 instance
-            sender_address: Transaction sender address
-            replace: Whether to replace pending transactions
-
-        Returns:
-            int: Transaction nonce to use
+        Determine the transaction nonce: the next available one, or when replace is True,
+        the nonce of the sender's oldest pending transaction so that one gets replaced.
         """
         # If we are not replacing a pending transaction, use the next available nonce
         if not replace:
@@ -473,17 +429,9 @@ class BlockchainClient:
 
     def _send_signed_transaction(self, signed_tx: SignedTransaction) -> str:
         """
-        Send a signed transaction and wait for the receipt.
-
-        Args:
-            signed_tx: The signed transaction to send.
-
-        Returns:
-            The transaction hash as a hex string.
-
-        Raises:
-            TransactionRevertedError: If the transaction reverts (not retryable).
-            NonceError: If a nonce-related error occurs (retryable via RPC rotation).
+        Send a signed transaction, wait for the receipt and return the tx hash. Raises
+        TransactionRevertedError if the transaction reverts (not retryable) and
+        NonceError for nonce-related failures (retryable via RPC rotation).
         """
         try:
             tx_hash = self._execute_rpc_call(self.w3.eth.send_raw_transaction, signed_tx.raw_transaction)
@@ -520,30 +468,10 @@ class BlockchainClient:
 
     def _execute_complete_transaction(self, params: Dict, rpc_rotation_count: int = 0) -> str:
         """
-        Execute the full lifecycle of a blockchain transaction.
-
-        This method orchestrates the entire process of sending a transaction,
-        including parameter validation, gas estimation, nonce determination,
-        transaction building, signing, and sending. If a nonce error occurs,
-        the method will rotate to the next RPC provider and retry with a fresh nonce.
-
-        Args:
-            params (Dict): A dictionary containing all necessary parameters for the transaction.
-                - private_key (str): The private key for signing.
-                - indexer_addresses (List[str]): Addresses to interact with.
-                - data_bytes (bytes): Data for the transaction.
-                - contract_function (str): The name of the contract function to call.
-                - chain_id (int): The ID of the blockchain.
-                - replace (bool): Flag to indicate if a pending transaction should be replaced.
-            rpc_rotation_count (int): Number of times RPC has been rotated for this transaction.
-                Used internally to prevent infinite rotation loops.
-
-        Returns:
-            str: The transaction hash of the successful transaction.
-
-        Raises:
-            ValueError: If required parameters are missing.
-            Exception: For errors during the transaction process.
+        Execute the full transaction lifecycle: validate params (private_key, indexer_addresses,
+        data_bytes, contract_function, chain_id, replace), estimate gas, determine the nonce,
+        then build, sign and send. Nonce errors rotate to the next RPC provider and retry with
+        a fresh nonce, bounded by rpc_rotation_count. Returns the transaction hash.
         """
         # Calculate max rotations based on number of providers (try each provider once)
         max_rpc_rotations = len(self.rpc_providers) - 1
@@ -636,18 +564,9 @@ class BlockchainClient:
         data_bytes: bytes = b"",
     ) -> str:
         """
-        Sends a single transaction to renew indexer rewards eligibility for a list of indexers.
-
-        Args:
-            indexer_addresses: A list of indexer addresses to be processed in the transaction.
-            private_key: The private key for signing the transaction.
-            chain_id: The identifier of the blockchain network.
-            contract_function: The specific contract function to be called (e.g., 'allow' or 'disallow').
-            replace: If True, attempts to replace a pending transaction.
-            data_bytes: Additional data for the transaction, if required.
-
-        Returns:
-            The hash of the sent transaction.
+        Send a single transaction renewing rewards eligibility for the given indexers,
+        returning the transaction hash. contract_function names the contract method to
+        call; replace attempts to replace a pending transaction when True.
         """
         logger.info(
             f"Preparing to send transaction for {len(indexer_addresses)} indexers "
@@ -682,25 +601,10 @@ class BlockchainClient:
         data_bytes: bytes = b"",
     ) -> tuple[List[str], str]:
         """
-        Batches indexer addresses and sends multiple transactions for renewing rewards eligibility.
+        Split indexer addresses into batches of batch_size and send one transaction per
+        batch to manage gas limits, halting on the first failure.
 
-        This function splits a large list of indexer addresses into smaller batches
-        and sends a separate transaction for each batch to manage gas limits and
-        network constraints effectively.
-
-        Args:
-            indexer_addresses: The full list of indexer addresses to be processed.
-            private_key: The private key for signing transactions.
-            chain_id: The ID of the blockchain network.
-            contract_function: The contract function to be called for each batch.
-            batch_size: The number of indexer addresses to include in each transaction.
-            replace: Flag to indicate if pending transactions should be replaced.
-            data_bytes: Additional data for the transaction.
-
-        Returns:
-            A tuple containing:
-            - A list of transaction hashes for all the batches sent
-            - The RPC provider URL that was used for the transactions
+        Returns a tuple of (explorer URLs for the sent transactions, RPC provider used).
         """
         # Ensure there are indexer addresses to process
         if not indexer_addresses:

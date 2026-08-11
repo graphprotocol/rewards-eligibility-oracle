@@ -5,6 +5,31 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.11](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.10...v0.4.11) (2026-08-11)
+
+
+### Added
+
+* **notifications:** mark each Slack message with its network ([#126](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/126)) ([e93b455](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/e93b4557d63760949681cb978c95447b5a593db0))
+
+
+### Fixed
+
+* fail over to the next RPC provider when quota runs out ([#129](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/129)) ([f652655](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/f6526553e1789cac54c5752a8dfcc5abd948d2dd))
+* stop RPC failover looping forever when all providers fail ([#128](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/128)) ([2a56b19](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/2a56b19838c9e16309a146c336db0b30851ccb72))
+
+
+### Changed
+
+* **deps:** Bump actions/setup-python from 6 to 7 ([#122](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/122)) ([7f7a4f6](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/7f7a4f6aec28c149985f325e41ab2b863b7d14d1))
+* **deps:** Bump python from 3.14.2-slim to 3.14.6-slim ([#116](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/116)) ([884e51b](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/884e51b74fc4c05f3f4e95ebf0ab81c3893755fa))
+
+
+### Documentation
+
+* **readme:** delete duplicate readme that hid the main one on GitHub ([#124](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/124)) ([e9c5092](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/e9c509288c052a7abb5abda24da07fd8d29a791c))
+* **readme:** rewrite README to be more visual and explanatory ([#123](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/123)) ([733abae](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/733abae4109607a1b1b1b79ef9e83f412a64ce45))
+
 ## [0.4.10](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.9...v0.4.10) (2026-07-13)
 
 

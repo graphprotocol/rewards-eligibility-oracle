@@ -237,8 +237,6 @@ class BlockchainClient:
 
                 providers_tried = self._count_provider_failure_and_rotate(providers_tried, e)
 
-                self._get_next_rpc_provider()
-
             # If we get an unexpected exception, log the error and raise the exception
             except Exception as e:
                 logger.error(f"An unexpected error occurred during RPC call: {e}")

@@ -10,7 +10,7 @@ import pytest
 import requests
 from pytest_mock import MockerFixture
 from web3 import Web3
-from web3.exceptions import TransactionNotFound
+from web3.exceptions import TransactionNotFound, Web3RPCError
 
 from src.models.blockchain_client import (
     BlockchainClient,
@@ -1221,3 +1221,79 @@ class TestNonceErrorRpcRotation:
 
         # No rotation should occur for non-nonce errors
         mock_rotate.assert_not_called()
+
+
+class TestProviderRejectionRotation:
+    """Tests for failover when a provider rejects calls with JSON-RPC error responses."""
+
+    # The exact JSON-RPC error 1RPC returned when the oracle's plan ran out of quota on 2026-08-11
+    QUOTA_ERROR = repr(
+        {
+            "message": "You've reached the usage limit for your current plan. To continue with higher "
+            "limits and uninterrupted access, please upgrade here: https://www.1rpc.io/#pricing",
+            "code": -32001,
+        }
+    )
+
+
+    def test_quota_error_rotates_to_next_provider(self, blockchain_client: BlockchainClient):
+        """
+        Tests that a provider answering with an out-of-quota JSON-RPC error rotates straight
+        to the next provider, without backoff retries against the exhausted provider.
+        """
+        # Arrange
+        mock_func = MagicMock(side_effect=[Web3RPCError(self.QUOTA_ERROR), "Success"])
+        blockchain_client.slack_notifier.reset_mock()
+
+        # Act
+        result = blockchain_client._execute_rpc_call(mock_func)
+
+        # Assert
+        assert result == "Success"
+        assert mock_func.call_count == 2
+        assert blockchain_client.current_rpc_index == 1
+        blockchain_client.slack_notifier.send_info_notification.assert_called_once()
+
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "execution reverted: not authorized",
+            "nonce too low",
+            "insufficient funds for gas * price + value",
+            "replacement transaction underpriced",
+        ],
+    )
+    def test_chain_level_errors_do_not_rotate(self, blockchain_client: BlockchainClient, message: str):
+        """
+        Tests that chain-level JSON-RPC errors re-raise without rotation, since every provider
+        gives the same answer; nonce errors keep flowing to the fresh-nonce retry logic.
+        """
+        # Arrange
+        mock_func = MagicMock(side_effect=Web3RPCError(message))
+        blockchain_client.slack_notifier.reset_mock()
+
+        # Act & Assert
+        with pytest.raises(Web3RPCError):
+            blockchain_client._execute_rpc_call(mock_func)
+
+        # No rotation should occur for chain-level errors
+        assert mock_func.call_count == 1
+        assert blockchain_client.current_rpc_index == 0
+        blockchain_client.slack_notifier.send_info_notification.assert_not_called()
+
+
+    def test_all_providers_rejecting_raises_connection_error(self, blockchain_client: BlockchainClient):
+        """
+        Tests that a ConnectionError is raised once every provider has rejected the call,
+        with a single attempt per provider since rejections skip backoff retries.
+        """
+        # Arrange
+        mock_func = MagicMock(side_effect=Web3RPCError(self.QUOTA_ERROR))
+
+        # Act & Assert
+        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+            blockchain_client._execute_rpc_call(mock_func)
+
+        # 1 call per provider in the 2-provider pool
+        assert mock_func.call_count == 2

@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta
+from typing import Optional
 
 import pytz
 import schedule
@@ -176,23 +177,11 @@ class Scheduler:
             # Load configuration
             config = load_config()
 
-            # Create Slack notifier
+            # Create Slack notifier and announce startup
             self.slack_notifier = create_slack_notifier(
                 config.get("SLACK_WEBHOOK_URL"), config.get("BLOCKCHAIN_CHAIN_ID")
             )
-            if self.slack_notifier:
-                logger.info("Slack notifications enabled for scheduler")
-                startup_message = (
-                    f"Rewards Eligibility Oracle scheduler started successfully.\n"
-                    f"**Scheduled time:** {config['SCHEDULED_RUN_TIME']} UTC\n"
-                    f"**Environment:** {os.environ.get('ENVIRONMENT', 'unknown')}"
-                )
-                self.slack_notifier.send_info_notification(
-                    message=startup_message,
-                    title="Scheduler Started",
-                )
-            else:
-                logger.info("Slack notifications disabled for scheduler")
+            self._notify_scheduler_started(config)
 
             pytz.timezone("UTC")
             run_time = config["SCHEDULED_RUN_TIME"]
@@ -213,18 +202,41 @@ class Scheduler:
 
         except Exception as e:
             logger.error(f"Failed to initialize scheduler: {e}", exc_info=True)
-            if not self.slack_notifier:
-                webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
-                if webhook_url:
-                    # Config may not have loaded yet, in which case the network stays unknown
-                    chain_id = config.get("BLOCKCHAIN_CHAIN_ID") if config else None
-                    self.slack_notifier = create_slack_notifier(webhook_url, chain_id)
-
-            if self.slack_notifier:
-                self.slack_notifier.send_failure_notification(
-                    error_message=str(e), stage="Scheduler Initialization", execution_time=0
-                )
+            self._notify_initialization_failure(config, e)
             sys.exit(1)
+
+
+    def _notify_scheduler_started(self, config: dict):
+        """Send the startup notification to Slack, or log that notifications are disabled."""
+        if not self.slack_notifier:
+            logger.info("Slack notifications disabled for scheduler")
+            return
+
+        logger.info("Slack notifications enabled for scheduler")
+        startup_message = (
+            f"Rewards Eligibility Oracle scheduler started successfully.\n"
+            f"**Scheduled time:** {config['SCHEDULED_RUN_TIME']} UTC\n"
+            f"**Environment:** {os.environ.get('ENVIRONMENT', 'unknown')}"
+        )
+        self.slack_notifier.send_info_notification(
+            message=startup_message,
+            title="Scheduler Started",
+        )
+
+
+    def _notify_initialization_failure(self, config: Optional[dict], error: Exception):
+        """Send a failure notification to Slack, creating the notifier from the environment if needed."""
+        if not self.slack_notifier:
+            webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+            if webhook_url:
+                # Config may not have loaded yet, in which case the network stays unknown
+                chain_id = config.get("BLOCKCHAIN_CHAIN_ID") if config else None
+                self.slack_notifier = create_slack_notifier(webhook_url, chain_id)
+
+        if self.slack_notifier:
+            self.slack_notifier.send_failure_notification(
+                error_message=str(error), stage="Scheduler Initialization", execution_time=0
+            )
 
 
     def run(self):

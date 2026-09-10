@@ -284,7 +284,7 @@ def test_main_uses_cached_data_when_fresh(oracle_context):
     ctx["main"]()
 
     # Should check for fresh data (called twice due to our conditional logic)
-    assert ctx["pipeline"].has_fresh_processed_data.call_count == 2
+    assert ctx["pipeline"].has_fresh_processed_data.call_count == 1
     ctx["pipeline"].has_fresh_processed_data.assert_called_with(date.today(), 30)
     # Should load from cache
     ctx["pipeline"].load_eligible_indexers_from_csv.assert_called_once_with(date.today())

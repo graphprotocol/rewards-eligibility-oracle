@@ -33,11 +33,9 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements file first to leverage Docker caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Create necessary directories for persistent data
-RUN mkdir -p /app/data/output /app/logs
+# Install Python dependencies and create the directories for persistent data
+RUN pip install --no-cache-dir -r requirements.txt \
+    && mkdir -p /app/data/output /app/logs
 
 # Copy the application code
 COPY src/ ./src/
@@ -48,16 +46,12 @@ COPY contracts/ ./contracts/
 COPY .gitignore ./
 COPY pyproject.toml ./
 
-# Create healthcheck file
-RUN touch /app/healthcheck
-
-# Create non-root user with UID 1000 for improved security
-# This ensures the application can write to /app/healthcheck at runtime
-RUN groupadd -f -g 1000 oracle && \
-    useradd -u 1000 -g oracle -s /bin/bash -m oracle
-
-# Change ownership of all /app files to the oracle user
-RUN chown -R oracle:oracle /app
+# Create the healthcheck file and a non-root user with UID 1000, then hand /app to that user
+# so the application can write to /app/healthcheck at runtime
+RUN touch /app/healthcheck \
+    && groupadd -f -g 1000 oracle \
+    && useradd -u 1000 -g oracle -s /bin/bash -m oracle \
+    && chown -R oracle:oracle /app
 
 # Switch to non-root user for runtime security
 USER oracle

@@ -44,11 +44,11 @@ class Scheduler:
                 with open(LAST_RUN_FILE) as f:
                     last_run_str = f.read().strip()
                     last_run_date = datetime.strptime(last_run_str, "%Y-%m-%d").date()
-            except (FileNotFoundError, OSError) as e:
+            except OSError as e:
                 # File disappeared between exists() check and open(), or permission issues
                 logger.warning(f"Last run file disappeared or became inaccessible: {e}")
                 return None
-            except (ValueError, IOError) as e:
+            except ValueError as e:
                 # File exists but content is corrupted or unreadable
                 logger.error(f"Error reading or parsing last run date file content: {e}")
                 return None

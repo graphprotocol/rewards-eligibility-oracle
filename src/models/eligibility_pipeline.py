@@ -145,7 +145,7 @@ class EligibilityPipeline:
                     try:
                         shutil.rmtree(item)
                         directories_removed += 1
-                    except (FileNotFoundError, OSError) as e:
+                    except OSError as e:
                         # Directory already deleted by another process or became inaccessible
                         logger.debug(f"Directory {item} already removed or inaccessible: {e}")
                         continue
@@ -203,7 +203,7 @@ class EligibilityPipeline:
             try:
                 if not file_path.exists() or file_path.stat().st_size == 0:
                     return False
-            except (FileNotFoundError, OSError):
+            except OSError:
                 # File disappeared between exists() check and stat() call
                 logger.debug(f"File {file_path} disappeared during existence check")
                 return False
@@ -239,7 +239,7 @@ class EligibilityPipeline:
         for file in csv_files:
             try:
                 file_mtimes.append(file.stat().st_mtime)
-            except (FileNotFoundError, OSError):
+            except OSError:
                 # File disappeared between glob() and stat(), skip it
                 logger.debug(f"File {file} disappeared during age calculation")
                 continue

@@ -411,23 +411,18 @@ class CredentialManager:
 
     def _setup_user_credentials_from_dict(self, creds_data: dict) -> None:
         """Set up user account credentials directly from a dictionary."""
-        # Try to set up the credentials
-        try:
-            credentials = Credentials(
-                token=None,
-                refresh_token=creds_data.get("refresh_token"),
-                client_id=creds_data.get("client_id"),
-                client_secret=creds_data.get("client_secret"),
-                token_uri="https://oauth2.googleapis.com/token",
-            )
+        # Build the credentials; any SDK error propagates to the caller
+        credentials = Credentials(
+            token=None,
+            refresh_token=creds_data.get("refresh_token"),
+            client_id=creds_data.get("client_id"),
+            client_secret=creds_data.get("client_secret"),
+            token_uri="https://oauth2.googleapis.com/token",
+        )
 
-            # Set credentials globally for GCP libraries
-            google.auth._default._CREDENTIALS = credentials  # type: ignore[attr-defined]
-            logger.info("Successfully loaded user account credentials from environment variable")
-
-        except Exception as e:
-            # Re-raise SDK exceptions for the caller to handle.
-            raise e
+        # Set credentials globally for GCP libraries
+        google.auth._default._CREDENTIALS = credentials  # type: ignore[attr-defined]
+        logger.info("Successfully loaded user account credentials from environment variable")
 
 
     def _setup_service_account_credentials_from_dict(self, creds_data: dict) -> None:

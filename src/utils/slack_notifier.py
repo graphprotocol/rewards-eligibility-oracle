@@ -14,6 +14,9 @@ from src.utils.retry_decorator import retry_with_backoff
 # Module-level logger
 logger = logging.getLogger(__name__)
 
+# Timestamp format shown in every Slack notification
+SLACK_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S UTC"
+
 # Prefixes that tell readers which network a notification came from, keyed by the chain the oracle posts to
 NETWORK_LABELS = {
     42161: "[MAINNET] :large_green_circle:",
@@ -132,7 +135,7 @@ class SlackNotifier:
         Returns:
             bool: True if notification was sent successfully
         """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        timestamp = datetime.now().strftime(SLACK_TIMESTAMP_FORMAT)
 
         # Create success message fields
         fields = [
@@ -206,7 +209,7 @@ class SlackNotifier:
             bool: True if notification was sent successfully
         """
         # Get the current timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        timestamp = datetime.now().strftime(SLACK_TIMESTAMP_FORMAT)
 
         fields = [
             {"title": "Status", "value": "Failed", "short": True},
@@ -267,7 +270,7 @@ class SlackNotifier:
         Returns:
             bool: True if notification was sent successfully
         """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        timestamp = datetime.now().strftime(SLACK_TIMESTAMP_FORMAT)
 
         # Create message fields
         fields = [

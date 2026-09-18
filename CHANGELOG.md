@@ -5,6 +5,14 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.12](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.11...v0.4.12) (2026-09-18)
+
+
+### Changed
+
+* **deps:** Bump python from 3.14.6-slim to 3.14.7-slim ([#131](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/131)) ([7e608c5](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/7e608c5fc467c092c02b0299b8b45520ee704e09))
+* **deps:** Bump the python-dependencies group across 1 directory with 13 updates ([#134](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/134)) ([c1db28d](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c1db28da3378b8899f8cf3abe110101c269e93e5))
+
 ## [0.4.11](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.10...v0.4.11) (2026-08-11)
 
 

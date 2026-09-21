@@ -21,7 +21,7 @@ numpy==2.5.3
 # Blockchain integration - Latest compatible versions
 web3==8.0.0
 eth-account==0.14.0
-eth-typing==5.2.1
+eth-typing==6.0.0
 
 # GraphQL and subgraph integration (for future subgraph functionality)
 gql==4.0.0

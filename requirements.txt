@@ -6,7 +6,7 @@ tomli==2.4.1
 
 # Scheduling and resilience
 schedule==1.2.2
-pytz==2025.2
+pytz==2026.3.post1
 tenacity==9.1.4
 
 # Google Cloud BigQuery for data processing

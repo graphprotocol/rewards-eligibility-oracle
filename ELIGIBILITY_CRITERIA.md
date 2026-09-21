@@ -36,13 +36,15 @@ Eligibility for indexing rewards is typically refreshed daily via the RewardsEli
 
 ### Where These Criteria Are Enforced
 
-The values above are the ones deployed today. They are set in [`k8s/configmap.yaml`](./k8s/configmap.yaml): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query that applies them is in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py).
+The values above are the ones deployed today. Most are set in [`k8s/configmap.yaml`](./k8s/configmap.yaml): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query that applies them is in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py), which also fixes the 2 values with no config key.
 
 | Requirement | Config Key | Deployed Value |
 |-------------|------------|----------------|
 | Days online required | `MIN_ONLINE_DAYS` | 5 |
 | Analysis window (days) | `BIGQUERY_ANALYSIS_PERIOD_DAYS` | 28 |
+| Qualifying queries per active day | None, set in the query | 1 |
 | Subgraphs served per active day | `MIN_SUBGRAPHS` | 1 |
+| Query response HTTP status | None, set in the query | 200 OK |
 | Query latency must be below (ms) | `MAX_LATENCY_MS` | 5,000 |
 | Blocks behind chainhead must be below | `MAX_BLOCKS_BEHIND` | 50,000 |
 

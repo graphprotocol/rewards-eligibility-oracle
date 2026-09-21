@@ -10,7 +10,7 @@ This document defines the requirements an Indexer must meet to be eligible for i
 
 | Upcoming Requirement | Justification | Date Requirement Will Be Updated/Introduced (YYYY-MM-DD) |
 |----------------------|---------------|----------------------------------------------------------|
-| **Example Requirement:** | This is a placeholder for future criteria. Watch this space to stay informed. We will also announce upcoming requirements via official channels. | `YYYY-MM-DD` |
+| **Subgraph Coverage:** To be active, an indexer must serve at least 1 qualifying query on each of **5 subgraphs** that day, up from **1 subgraph**. Indexers still need **5+ active days** in a given **28 day** period. | Encourages indexers to sync and reliably serve a range of subgraphs rather than a single one. | 2026-10-06 |
 
 > **Note**:
 > We will typically allow a 14 day window after announcing a change before it goes live.

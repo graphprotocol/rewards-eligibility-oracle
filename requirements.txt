@@ -19,7 +19,7 @@ pandera==0.33.1
 numpy==2.5.3
 
 # Blockchain integration - Latest compatible versions
-web3==7.14.0
+web3==8.0.0
 eth-account==0.14.0
 eth-typing==5.2.1
 

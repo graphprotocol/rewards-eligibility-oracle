@@ -2,6 +2,7 @@
 Unit tests for the BigQueryProvider.
 """
 
+import sqlite3
 from datetime import date
 from unittest.mock import MagicMock, patch
 
@@ -168,6 +169,53 @@ class TestGetIndexerEligibilityQuery:
         """
         query = provider._get_indexer_eligibility_query(start_date=START_DATE, end_date=END_DATE)
         snapshot.assert_match(query, "indexer_eligibility_query.sql")
+
+
+    def test_get_indexer_eligibility_query_only_counts_subgraphs_with_a_qualifying_query(
+        self, mock_bpd: MagicMock
+    ):
+        """
+        Runs the query on an in-memory SQLite table to check that a subgraph only counts towards
+        min_subgraphs when the indexer served a qualifying query on it that day.
+        """
+        provider = BigQueryProvider(
+            project=MOCK_PROJECT,
+            location=MOCK_LOCATION,
+            table_name="query_logs",
+            min_online_days=1,
+            min_subgraphs=5,
+            max_latency_ms=MOCK_MAX_LATENCY_MS,
+            max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
+        )
+        day = START_DATE.strftime("%Y-%m-%d")
+
+        # 0xpartial has 1 qualifying query, plus failed, slow and stale queries on 4 other subgraphs
+        rows = [
+            (day, "0xpartial", "sg0", "200 OK", 100, 0),
+            (day, "0xpartial", "sg1", "500 Internal Server Error", 100, 0),
+            (day, "0xpartial", "sg2", "200 OK", MOCK_MAX_LATENCY_MS, 0),
+            (day, "0xpartial", "sg3", "200 OK", 100, MOCK_MAX_BLOCKS_BEHIND),
+            (day, "0xpartial", "sg4", "500 Internal Server Error", 100, 0),
+        ]
+
+        # 0xfull has a qualifying query on each of 5 subgraphs
+        rows += [(day, "0xfull", f"sg{i}", "200 OK", 100, 0) for i in range(5)]
+
+        # Run the generated query against the rows
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            "CREATE TABLE query_logs (day_partition TEXT, indexer TEXT, deployment TEXT, status TEXT, "
+            "response_time_ms INTEGER, blocks_behind INTEGER)"
+        )
+        connection.executemany("INSERT INTO query_logs VALUES (?, ?, ?, ?, ?, ?)", rows)
+        query = provider._get_indexer_eligibility_query(start_date=START_DATE, end_date=START_DATE)
+        result = pd.read_sql_query(query, connection).set_index("indexer")
+        connection.close()
+
+        assert result.loc["0xpartial", "total_good_days_online"] == 0
+        assert result.loc["0xpartial", "eligible_for_indexing_rewards"] == 0
+        assert result.loc["0xfull", "total_good_days_online"] == 1
+        assert result.loc["0xfull", "eligible_for_indexing_rewards"] == 1
 
 
     def test_get_indexer_eligibility_query_handles_single_day_range(self, provider: BigQueryProvider):

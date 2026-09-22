@@ -18,6 +18,11 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Names of the CSV files written to each day's output directory
+RAW_DATA_CSV = "indexer_issuance_eligibility_data.csv"
+ELIGIBLE_INDEXERS_CSV = "eligible_indexers.csv"
+INELIGIBLE_INDEXERS_CSV = "ineligible_indexers.csv"
+
 
 class EligibilityPipeline:
     """Handles the data processing pipeline and file management operations."""
@@ -89,13 +94,13 @@ class EligibilityPipeline:
         output_date_dir.mkdir(exist_ok=True, parents=True)
 
         # Save raw data for internal use
-        raw_data_path = output_date_dir / "indexer_issuance_eligibility_data.csv"
+        raw_data_path = output_date_dir / RAW_DATA_CSV
         raw_data.to_csv(raw_data_path, index=False)
         logger.info(f"Saved raw BigQuery results to: {raw_data_path}")
 
         # Save filtered data
-        eligible_path = output_date_dir / "eligible_indexers.csv"
-        ineligible_path = output_date_dir / "ineligible_indexers.csv"
+        eligible_path = output_date_dir / ELIGIBLE_INDEXERS_CSV
+        ineligible_path = output_date_dir / INELIGIBLE_INDEXERS_CSV
 
         eligible_df[["indexer"]].to_csv(eligible_path, index=False)
         ineligible_df[["indexer"]].to_csv(ineligible_path, index=False)
@@ -187,9 +192,9 @@ class EligibilityPipeline:
 
         # Define required files
         required_files = [
-            "eligible_indexers.csv",
-            "indexer_issuance_eligibility_data.csv",
-            "ineligible_indexers.csv",
+            ELIGIBLE_INDEXERS_CSV,
+            RAW_DATA_CSV,
+            INELIGIBLE_INDEXERS_CSV,
         ]
 
         # Check that all required files exist and are not empty
@@ -296,7 +301,7 @@ class EligibilityPipeline:
             ValueError: If the CSV file is malformed or empty
         """
         output_date_dir = self.get_date_output_directory(current_date)
-        eligible_file = output_date_dir / "eligible_indexers.csv"
+        eligible_file = output_date_dir / ELIGIBLE_INDEXERS_CSV
 
         if not eligible_file.exists():
             raise FileNotFoundError(f"Eligible indexers CSV not found: {eligible_file}")

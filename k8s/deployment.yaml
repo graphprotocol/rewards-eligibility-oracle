@@ -14,6 +14,8 @@ spec:
       labels:
         app: rewards-eligibility-oracle
     spec:
+      # The oracle never calls the Kubernetes API, so it does not need a service account token
+      automountServiceAccountToken: false
       containers:
       - name: rewards-eligibility-oracle
         image: ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.4.11 # x-release-please-version
@@ -65,9 +67,11 @@ spec:
           requests:
             memory: "512M"  # Match docker-compose reservations
             cpu: "250m"
+            ephemeral-storage: "256Mi"
           limits:
-            memory: "1G"    # Match docker-compose limits  
+            memory: "1G"    # Match docker-compose limits
             cpu: "1000m"    # Match docker-compose '1.0' cpus
+            ephemeral-storage: "1Gi"  # Data and logs live on persistent volumes, so scratch use stays small
         # Use file-based healthcheck like docker-compose (not HTTP)
         livenessProbe:
           exec:

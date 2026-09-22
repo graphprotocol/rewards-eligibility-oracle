@@ -49,59 +49,65 @@ class PythonFormatter:
         return isinstance(self.node_parents.get(node), ast.ClassDef)
 
 
-    def format(self) -> str:
+    def _definitions_by_start_line(self):
+        """Return every class and function definition, keyed by the line its first decorator or header sits on."""
         nodes = {}
         for node in ast.walk(self.tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                start_line = self.get_node_start_line(node)
-                nodes[start_line] = node
+                nodes[self.get_node_start_line(node)] = node
+        return nodes
 
+
+    def _required_blank_lines(self, node) -> int:
+        """Return how many blank lines should sit above a definition."""
+        if isinstance(node, ast.ClassDef):
+            return 2
+        if self.is_method(node) and node.name == "__init__":
+            return 1
+        return 2
+
+
+    @staticmethod
+    def _previous_code_line_index(lines, start_index) -> int:
+        """Return the index of the nearest non-blank line above start_index, or -1 at the start of the file."""
+        i = start_index - 1
+        while i > 0 and not lines[i].strip():
+            i -= 1
+        return max(i, -1)
+
+
+    @staticmethod
+    def _pad_blank_lines(lines, start_index, previous_code_index, num_blank_lines):
+        """Ensure at least num_blank_lines blank lines sit between the previous code line and start_index."""
+        existing_blank_lines = sum(
+            1 for k in range(start_index - 1, previous_code_index, -1) if not lines[k].strip()
+        )
+        if existing_blank_lines >= num_blank_lines:
+            return
+
+        del lines[previous_code_index + 1 : start_index]
+        for _ in range(num_blank_lines):
+            lines.insert(previous_code_index + 1, "")
+
+
+    def format(self) -> str:
         lines = list(self.source_lines)
-        sorted_nodes = sorted(nodes.items(), key=lambda x: x[0], reverse=True)
 
+        # Walk definitions bottom-up so inserting lines above one never shifts the ones still to process
+        sorted_nodes = sorted(self._definitions_by_start_line().items(), key=lambda x: x[0], reverse=True)
         for lineno, node in sorted_nodes:
-            start_index = lineno - 1
-            num_blank_lines = 0
-
             # Skip formatting if node is inside a "fmt: off" block
             if self._is_in_disabled_range(lineno):
                 continue
 
-            if isinstance(node, ast.ClassDef):
-                num_blank_lines = 2
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if self.is_method(node):
-                    if node.name == "__init__":
-                        num_blank_lines = 1
-                    else:
-                        num_blank_lines = 2
-                else:
-                    num_blank_lines = 2
+            start_index = lineno - 1
+            previous_code_index = self._previous_code_line_index(lines, start_index)
 
-            i = start_index - 1
-            while i > 0 and not lines[i].strip():
-                i -= 1
+            # A definition that is the first thing in the file needs no blank lines above it
+            if previous_code_index == -1:
+                continue
 
-            if i < 0:  # start of file
-                i = -1  # will insert at 0
-
-            # For top-level nodes, we don't want to add spaces if it's the first thing in the file
-            # after imports. Let's check if there's anything but imports above.
-            is_truly_top_level = i == -1
-            if not is_truly_top_level:
-                # Count existing blank lines
-                existing_blank_lines = 0
-                for k in range(start_index - 1, i, -1):
-                    if not lines[k].strip():
-                        existing_blank_lines += 1
-
-                # Only add lines if there are not enough
-                if existing_blank_lines < num_blank_lines:
-                    # remove existing blank lines
-                    del lines[i + 1 : start_index]
-                    # insert new blank lines
-                    for _ in range(num_blank_lines):
-                        lines.insert(i + 1, "")
+            self._pad_blank_lines(lines, start_index, previous_code_index, self._required_blank_lines(node))
 
         result = "\n".join(line.rstrip() for line in lines)
         if result:

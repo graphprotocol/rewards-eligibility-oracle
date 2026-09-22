@@ -5,6 +5,33 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.12](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.11...v0.4.12) (2026-09-22)
+
+
+### Fixed
+
+* count only qualifying subgraphs and announce minimum of 5 ([#154](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/154)) ([6650865](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/66508655c229dff3027a7da63d3ab875258a25a5))
+
+
+### Changed
+
+* **deps:** Bump eth-typing from 5.2.1 to 6.0.0 ([#149](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/149)) ([6831ce5](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/6831ce589c16ab9ee0890358c6a999a6abd923b4))
+* **deps:** Bump mypy from 1.19.1 to 2.3.1 ([#152](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/152)) ([7aa920c](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/7aa920c1e4f5bae49ee3abd1ca5797a087eca64b))
+* **deps:** Bump pandas from 2.3.3 to 3.0.6 ([#147](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/147)) ([7f10890](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/7f108904e4e4aaeb710264adcee7d8467e2248dc))
+* **deps:** Bump python from 3.14.6-slim to 3.14.7-slim ([#131](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/131)) ([7e608c5](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/7e608c5fc467c092c02b0299b8b45520ee704e09))
+* **deps:** Bump pytz from 2025.2 to 2026.3.post1 ([#146](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/146)) ([15bb229](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/15bb229caa8ec26e55a8eab75908e263f8679b3e))
+* **deps:** Bump the python-dependencies group across 1 directory with 13 updates ([#134](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/134)) ([c1db28d](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c1db28da3378b8899f8cf3abe110101c269e93e5))
+* **deps:** Bump the python-dependencies group with 4 updates ([#145](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/145)) ([5485be3](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/5485be30c28ca5611cfec694bbe520f08ba24d31))
+* **deps:** Bump types-pytz from 2025.2.0.20251108 to 2026.3.1.20260727 ([#151](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/151)) ([6ad6d17](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/6ad6d170fcb577baedea3742dc190613efc68e12))
+* **deps:** Bump types-requests from 2.33.0.20260712 to 2.33.0.20260906 ([#150](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/150)) ([fd45c3e](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/fd45c3e064c5168527c23688d06d7866e2c294ec))
+* **deps:** Bump web3 from 7.14.0 to 8.0.0 ([#148](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/148)) ([2f39cf4](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/2f39cf43959406ce5cab9a6ee631f5df7dc26bd7))
+* **slack:** share 1 timestamp format across all notifications ([62f9142](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/62f91421b5338fa7fd6e5e95f1943e89c9132399))
+
+
+### Documentation
+
+* add missing subgraph rule and config keys to criteria ([#153](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/153)) ([99ed83f](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/99ed83f5aaa70923dedf09b82316fc38def4e5a3))
+
 ## [0.4.11](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.10...v0.4.11) (2026-08-11)
 
 

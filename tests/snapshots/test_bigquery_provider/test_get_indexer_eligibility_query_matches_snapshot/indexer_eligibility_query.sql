@@ -6,14 +6,8 @@
                 day_partition AS day,
                 indexer,
                 COUNT(*) AS query_attempts,
-                SUM(CASE
-                    WHEN status = '200 OK'
-                    AND response_time_ms < 5000
-                    AND blocks_behind < 50000
-                    THEN 1
-                    ELSE 0
-                END) AS good_responses,
-                COUNT(DISTINCT deployment) AS unique_subgraphs_served
+                SUM(CASE WHEN status = '200 OK' AND response_time_ms < 5000 AND blocks_behind < 50000 THEN 1 ELSE 0 END) AS good_responses,
+                COUNT(DISTINCT CASE WHEN status = '200 OK' AND response_time_ms < 5000 AND blocks_behind < 50000 THEN deployment END) AS good_response_subgraphs
             FROM
                 test.dataset.table
             WHERE
@@ -21,13 +15,13 @@
             GROUP BY
                 day_partition, indexer
         ),
-        -- Determine which days count as 'online' (>= 1 good query on >= 10 subgraphs)
+        -- Determine which days count as 'online' (>= 1 good query on each of >= 1 subgraphs)
         DaysOnline AS (
             SELECT
                 indexer,
                 day,
-                unique_subgraphs_served,
-                CASE WHEN good_responses >= 1 AND unique_subgraphs_served >= 1
+                good_response_subgraphs,
+                CASE WHEN good_responses >= 1 AND good_response_subgraphs >= 1
                     THEN 1 ELSE 0
                 END AS is_online_day
             FROM
@@ -42,9 +36,7 @@
                 test.dataset.table
             WHERE
                 day_partition BETWEEN '2025-01-01' AND '2025-01-28'
-                AND status = '200 OK'
-                AND response_time_ms < 5000
-                AND blocks_behind < 50000
+                AND status = '200 OK' AND response_time_ms < 5000 AND blocks_behind < 50000
             GROUP BY
                 indexer
         ),

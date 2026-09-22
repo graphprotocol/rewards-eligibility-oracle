@@ -31,17 +31,10 @@ class BigQueryProvider:
         credentials: Optional[google.auth.credentials.Credentials] = None,
     ) -> None:
         """
-        Initialize BigQuery provider with optional explicit credentials.
+        Initialize BigQuery provider for a GCP project, location (e.g. 'US') and fully qualified table name.
 
-        Params:
-            project: GCP project ID
-            location: BigQuery location (e.g., 'US')
-            table_name: Fully qualified table name
-            min_online_days: Minimum days online for eligibility
-            min_subgraphs: Minimum unique subgraphs served
-            max_latency_ms: Maximum acceptable latency
-            max_blocks_behind: Maximum blocks behind threshold
-            credentials: Optional Google Cloud credentials. If None, uses ADC.
+        The min_* and max_* params are the eligibility thresholds applied by the eligibility query.
+        If credentials is None, Application Default Credentials (ADC) are used.
         """
         # Configure BigQuery connection globally for all SQL queries to BigQuery
         bpd.options.bigquery.location = location
@@ -69,12 +62,6 @@ class BigQueryProvider:
         """
         Execute a read query on Google BigQuery and return the results as a pandas DataFrame.
         Retries up to max_attempts times on connection errors with exponential backoff.
-
-        Note:
-            This method uses the bigframes.pandas.read_gbq function to execute the query. It relies on
-            Application Default Credentials (ADC) for authentication, primarily using the
-            GOOGLE_APPLICATION_CREDENTIALS environment variable if set. This variable should point to
-            the JSON file containing the service account key.
         """
         # Execute the query with retry logic
         return cast(DataFrame, bpd.read_gbq(query).to_pandas())
@@ -82,23 +69,21 @@ class BigQueryProvider:
 
     def _get_indexer_eligibility_query(self, start_date: date, end_date: date) -> str:
         """
-        Construct an SQL query that calculates indexer eligibility:
-        - Indexer must be online for at least 5 days in the analysis period
-        - A day counts as 'online' if the indexer serves at least 1 qualifying query on 10 different subgraphs
-        - A qualifying query is defined as one that meets all of the following criteria:
-            - HTTP status '200 OK',
-            - Response latency <5,000ms,
-            - Blocks behind <50,000
-
-        Args:
-            start_date (date): The start date for the data range.
-            end_date (date): The end date for the data range.
-
-        Returns:
-            str: SQL query string for indexer eligibility data.
+        Build the SQL query that marks an indexer eligible if it was online on >= min_online_days days
+        between start_date and end_date. A day counts as online if the indexer served >= 1 qualifying query
+        on each of >= min_subgraphs subgraphs. A qualifying query has HTTP status '200 OK', latency below
+        max_latency_ms and fewer than max_blocks_behind blocks behind chainhead.
         """
         start_date_str = start_date.strftime("%Y-%m-%d")
         end_date_str = end_date.strftime("%Y-%m-%d")
+
+        # Define a qualifying query once so every count in the query applies the same criteria
+        is_qualifying_query = (
+            f"status = '200 OK' "
+            f"AND response_time_ms < {self.max_latency_ms} "
+            f"AND blocks_behind < {self.max_blocks_behind}"
+        )
+
         return f"""
         WITH
         -- Get daily query metrics per indexer
@@ -107,14 +92,8 @@ class BigQueryProvider:
                 day_partition AS day,
                 indexer,
                 COUNT(*) AS query_attempts,
-                SUM(CASE
-                    WHEN status = '200 OK'
-                    AND response_time_ms < {self.max_latency_ms}
-                    AND blocks_behind < {self.max_blocks_behind}
-                    THEN 1
-                    ELSE 0
-                END) AS good_responses,
-                COUNT(DISTINCT deployment) AS unique_subgraphs_served
+                SUM(CASE WHEN {is_qualifying_query} THEN 1 ELSE 0 END) AS good_responses,
+                COUNT(DISTINCT CASE WHEN {is_qualifying_query} THEN deployment END) AS good_response_subgraphs
             FROM
                 {self.table_name}
             WHERE
@@ -122,13 +101,13 @@ class BigQueryProvider:
             GROUP BY
                 day_partition, indexer
         ),
-        -- Determine which days count as 'online' (>= 1 good query on >= 10 subgraphs)
+        -- Determine which days count as 'online' (>= 1 good query on each of >= {self.min_subgraphs} subgraphs)
         DaysOnline AS (
             SELECT
                 indexer,
                 day,
-                unique_subgraphs_served,
-                CASE WHEN good_responses >= 1 AND unique_subgraphs_served >= {self.min_subgraphs}
+                good_response_subgraphs,
+                CASE WHEN good_responses >= 1 AND good_response_subgraphs >= {self.min_subgraphs}
                     THEN 1 ELSE 0
                 END AS is_online_day
             FROM
@@ -143,9 +122,7 @@ class BigQueryProvider:
                 {self.table_name}
             WHERE
                 day_partition BETWEEN '{start_date_str}' AND '{end_date_str}'
-                AND status = '200 OK'
-                AND response_time_ms < {self.max_latency_ms}
-                AND blocks_behind < {self.max_blocks_behind}
+                AND {is_qualifying_query}
             GROUP BY
                 indexer
         ),
@@ -186,26 +163,9 @@ class BigQueryProvider:
 
     def fetch_indexer_issuance_eligibility_data(self, start_date: date, end_date: date) -> DataFrame:
         """
-        Fetch data from Google BigQuery, used to determine indexer issuance eligibility, and compute
-        each indexer's issuance eligibility status.
-
-        Depends on:
-            - _get_indexer_eligibility_query()
-            - _read_gbq_dataframe()
-
-        Args:
-            start_date (date): The start date for the data to fetch from BigQuery.
-            end_date (date): The end date for the data to fetch from BigQuery.
-
-        Returns:
-            DataFrame: DataFrame containing a range of metrics for each indexer.
-                The DataFrame contains the following columns:
-                    - indexer: The indexer address.
-                    - total_query_attempts: The total number of queries made by the indexer.
-                    - total_good_responses: The total number of good responses made by the indexer.
-                    - total_good_days_online: The number of days the indexer was online.
-                    - unique_good_response_subgraphs: Number of unique subgraphs indexer served w/good responses.
-                    - eligible_for_indexing_rewards: Whether the indexer is eligible for indexing rewards.
+        Fetch per-indexer metrics from BigQuery for start_date to end_date and compute rewards eligibility.
+        Returns a DataFrame with columns indexer, query_attempts, good_responses, total_good_days_online,
+        unique_good_response_subgraphs and eligible_for_indexing_rewards (1 if eligible, else 0).
         """
         # Construct the query
         query = self._get_indexer_eligibility_query(start_date=start_date, end_date=end_date)

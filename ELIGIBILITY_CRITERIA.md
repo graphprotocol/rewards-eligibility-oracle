@@ -23,6 +23,7 @@ The following criteria are used to identify indexers that should be eligible to 
 
 - **Days Online Requirement:** Indexers must be active for **5+ days** in a given **28 day** period for rewards eligibility.
 - **Daily Query Requirement:** To be active, an indexer must serve at least **1 qualifying query**.
+- **Subgraph Coverage Requirement:** To be active, an indexer must serve queries on at least **1 subgraph** that day. Any day with a qualifying query already meets this.
 - **Query Quality Requirements:** A qualifying query is one that simultaneously meets **all** of the following criteria:
   - Query Response HTTP Status: **200 OK**.
   - Query Response Latency: **< 5,000 ms**.
@@ -32,6 +33,20 @@ Eligibility for indexing rewards is typically refreshed daily via the RewardsEli
 
 > **Note**:
 > Once an indexer has successfully qualified for indexing rewards by satisfying the active eligibility criteria, and a corresponding transaction has been submitted on chain by an authorized Oracle into the RewardsEligibilityOracle contract, the now eligible indexer can continue claiming indexing rewards from the protocol for the duration of the qualification period (default is 14 days), even if the active eligibility criteria change.
+
+### Where These Criteria Are Enforced
+
+The values above are the ones deployed today. Most are set in [`k8s/configmap.yaml`](./k8s/configmap.yaml): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query that applies them is in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py), which also fixes the 2 values with no config key.
+
+| Requirement | Config Key | Deployed Value |
+|-------------|------------|----------------|
+| Days online required | `MIN_ONLINE_DAYS` | 5 |
+| Analysis window (days) | `BIGQUERY_ANALYSIS_PERIOD_DAYS` | 28 |
+| Qualifying queries per active day | None, set in the query | 1 |
+| Subgraphs served per active day | `MIN_SUBGRAPHS` | 1 |
+| Query response HTTP status | None, set in the query | 200 OK |
+| Query latency must be below (ms) | `MAX_LATENCY_MS` | 5,000 |
+| Blocks behind chainhead must be below | `MAX_BLOCKS_BEHIND` | 50,000 |
 
 ---
 
@@ -43,6 +58,7 @@ This table tracks changes to the indexing rewards eligibility requirements over 
 |----------------------|---------------------|-----------------------------|-------------|---------------|-------|
 | **Indexer Activity** | Indexers must be active for **5+ days** in a given **28 day** period for indexing rewards eligibility. | 2026-08-25 | Initial | Encourages indexers to familiarize themselves with infrastructure maintenance and ongoing operations. | Planned for Rewards Eligibility Oracle launch |
 | **Query Qualification** | Indexers must serve **≥1 qualifying query** in a day for the day to count towards the **Indexer Activity** requirement. | 2026-08-25 | Initial | Encourages indexers to become familiar with the process of syncing and serving subgraph data. | Planned for Rewards Eligibility Oracle launch |
+| **Subgraph Coverage** | Indexers must serve queries on **≥1 subgraph** in a day for the day to count towards the **Indexer Activity** requirement. | 2026-08-25 | Initial | Sets a minimum number of subgraphs an indexer must serve each day. At **1** it is met by any day with a qualifying query. | Planned for Rewards Eligibility Oracle launch |
 | **Query Response Quality** | *•* Query Response HTTP Status: **200 OK**<br>*•* Query Response Latency: **< 5,000 ms**<br>*•* Query Freshness: **< 50,000 blocks** behind chainhead. | 2026-08-25 | Initial | *•* Indexer infrastructure needs to serve successful queries to benefit data consumers.<br>*•* Fast query responses are important to data consumers.<br>*•* Encourages indexers to sync to chainhead. | Planned for Rewards Eligibility Oracle launch |
 
 ---

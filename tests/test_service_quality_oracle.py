@@ -40,6 +40,25 @@ MOCK_CONFIG = {
     "ARBITRUM_API_KEY": "fake-arbitrum-key",
 }
 
+# A DataEdge deployment to publish per-day metrics to. Absent from MOCK_CONFIG so that publishing
+# stays off unless a test opts into it.
+MOCK_DATA_EDGE_ADDRESS = "0x62c2305739cc75f19a3a6d52387ceb3690d99a99"
+
+# Stands in for the grid the pipeline returns, which the oracle publishes without rebuilding it
+MOCK_DAILY_METRICS_GRID = pd.DataFrame(
+    {
+        "day": ["2026-09-25"],
+        "indexer": ["0x32bbd16a94ebb289edceebe77f35acc82664157b"],
+        "query_attempts": [10],
+        "qualifying_queries": [8],
+        "qualifying_subgraphs": [2],
+        "failed_status": [1],
+        "failed_latency": [1],
+        "failed_blocks_behind": [0],
+        "is_online_day": [1],
+    }
+)
+
 
 @pytest.fixture
 def oracle_context():
@@ -51,6 +70,7 @@ def oracle_context():
         patch("src.models.bigquery_provider.BigQueryProvider") as mock_bq_provider_cls,
         patch("src.models.eligibility_pipeline.EligibilityPipeline") as mock_pipeline_cls,
         patch("src.models.blockchain_client.BlockchainClient") as mock_client_cls,
+        patch("src.models.data_edge_client.DataEdgeClient") as mock_data_edge_cls,
         patch("src.utils.circuit_breaker.CircuitBreaker") as mock_circuit_breaker_cls,
         patch("src.models.rewards_eligibility_oracle.Path") as mock_path_cls,
         patch("logging.Logger.error") as mock_logger_error,
@@ -71,6 +91,8 @@ def oracle_context():
 
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.process.return_value = (["0xEligible"], ["0xIneligible"])
+        # The grid is returned so it can be published without being rebuilt, so it must be real data
+        mock_pipeline.write_daily_metrics.return_value = MOCK_DAILY_METRICS_GRID
         # Configure caching methods to force BigQuery path by default (for existing test compatibility)
         mock_pipeline.has_fresh_processed_data.return_value = False
         mock_pipeline.load_eligible_indexers_from_csv.return_value = ["0xEligible"]
@@ -107,6 +129,8 @@ def oracle_context():
             "pipeline": mock_pipeline,
             "client_cls": mock_client_cls,
             "client": mock_client,
+            "data_edge_cls": mock_data_edge_cls,
+            "data_edge": mock_data_edge_cls.return_value,
             "circuit_breaker": mock_breaker_instance,
             "project_root": mock_project_root,
             "logger_error": mock_logger_error,
@@ -346,3 +370,69 @@ def test_main_falls_back_to_bigquery_when_cached_data_load_fails(oracle_context)
     ctx["bq_provider_cls"].assert_called_once()
     # Should call process normally after fallback
     ctx["pipeline"].process.assert_called_once()
+
+
+# --- Tests for DataEdge publishing ---
+
+
+def test_main_skips_data_edge_publishing_when_no_contract_is_configured(oracle_context):
+    """Test that publishing is skipped, rather than attempted, when no DataEdge contract is set."""
+    ctx = oracle_context
+
+    ctx["main"]()
+
+    ctx["data_edge_cls"].assert_not_called()
+    # The rest of the run is unaffected
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
+
+
+def test_main_publishes_daily_metrics_when_a_contract_is_configured(oracle_context):
+    """Test that a configured DataEdge contract receives the run's per-day metrics payload."""
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+
+    ctx["main"]()
+
+    # The client is pointed at the configured contract, on the same chain as the renewals
+    ctx["data_edge_cls"].assert_called_once()
+    call_kwargs = ctx["data_edge_cls"].call_args.kwargs
+    assert call_kwargs["contract_address"] == MOCK_DATA_EDGE_ADDRESS
+    assert call_kwargs["chain_id"] == MOCK_CONFIG["BLOCKCHAIN_CHAIN_ID"]
+
+    # A real, non-empty payload is published
+    ctx["data_edge"].post_payload.assert_called_once()
+    payload, private_key = ctx["data_edge"].post_payload.call_args.args
+    assert payload.startswith(b"RE")
+    assert private_key == MOCK_CONFIG["PRIVATE_KEY"]
+
+
+def test_main_publishes_before_submitting_renewals(oracle_context):
+    """
+    Test that metrics are published before renewals are submitted, so that a failed submission still
+    leaves the run's diagnostics on chain for the indexers that need them.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["client"].batch_renew_indexer_rewards_eligibility.side_effect = Exception("submission error")
+
+    with pytest.raises(SystemExit):
+        ctx["main"]()
+
+    ctx["data_edge"].post_payload.assert_called_once()
+
+
+def test_main_survives_a_data_edge_publishing_failure(oracle_context):
+    """
+    Test that a publishing failure does not fail the run, since the payload is diagnostic and the
+    renewal transactions matter more.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["data_edge"].post_payload.side_effect = Exception("all providers failed")
+
+    ctx["main"]()
+
+    # Renewals still happen and the run still reports success
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
+    ctx["circuit_breaker"].record_failure.assert_not_called()
+    ctx["slack"]["notifier"].send_success_notification.assert_called_once()

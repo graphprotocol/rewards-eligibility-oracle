@@ -1,0 +1,206 @@
+"""
+Client for publishing eligibility metrics payloads to a DataEdge contract.
+
+DataEdge stores no state and executes nothing: its fallback function accepts any calldata and
+re-emits it as a Log event for a subgraph to decode. Publishing is therefore a plain transaction to
+the contract address carrying the payload as calldata, with no ABI involved.
+
+This is deliberately separate from BlockchainClient. Publishing metrics must never be able to affect
+the transactions that renew indexer eligibility, and the two have no shared failure domain.
+"""
+
+import logging
+from typing import List, Optional
+
+from web3 import Web3
+
+logger = logging.getLogger(__name__)
+
+# Applied to the estimated gas limit to absorb estimation drift between quote and inclusion
+GAS_LIMIT_BUFFER = 1.25
+
+# Gas charged per calldata byte, used only when an RPC provider refuses to estimate gas for a
+# fallback-only contract. Deliberately the non-zero byte rate for every byte, plus the cost of
+# emitting the payload as log data and a generous allowance for transaction overhead.
+FALLBACK_GAS_PER_CALLDATA_BYTE = 16
+FALLBACK_GAS_PER_LOG_BYTE = 8
+FALLBACK_GAS_OVERHEAD = 100_000
+
+
+class DataEdgeRevertedError(Exception):
+    """
+    Raised when a publishing transaction is mined but reverts.
+
+    A revert is deterministic, so it is not retried on another provider: doing so would mine, and pay
+    for, the same failing transaction once per configured RPC provider.
+    """
+
+
+class DataEdgeClient:
+    """Publishes opaque payloads to a DataEdge contract, rotating RPC providers on failure."""
+
+    def __init__(
+        self,
+        rpc_providers: List[str],
+        contract_address: str,
+        chain_id: int,
+        block_explorer_url: str,
+        tx_timeout_seconds: int,
+    ):
+        """
+        Initialize the client for a DataEdge deployment.
+
+        Args:
+            rpc_providers: RPC URLs to try, in order
+            contract_address: Address of the DataEdge contract
+            chain_id: Chain the contract is deployed on
+            block_explorer_url: Explorer base URL, e.g. https://sepolia.arbiscan.io
+            tx_timeout_seconds: Bounds the wait for a transaction receipt
+        """
+        if not rpc_providers:
+            raise ValueError("At least one RPC provider is required to publish to DataEdge.")
+
+        self.rpc_providers = rpc_providers
+        self.contract_address = Web3.to_checksum_address(contract_address)
+        self.chain_id = chain_id
+        self.block_explorer_url = block_explorer_url.rstrip("/")
+        self.tx_timeout_seconds = tx_timeout_seconds
+
+
+    def _estimate_gas(self, w3: Web3, sender_address: str, payload: bytes) -> int:
+        """
+        Estimate the gas limit for publishing a payload.
+
+        Args:
+            w3: Connected Web3 instance
+            sender_address: Address the transaction will be sent from
+            payload: Calldata to publish
+
+        Returns:
+            int: Gas limit to use
+        """
+        # Estimate against the node, which accounts for the contract's own execution
+        try:
+            estimated = w3.eth.estimate_gas({"from": sender_address, "to": self.contract_address, "data": payload})
+            return int(estimated * GAS_LIMIT_BUFFER)
+
+        # Some providers refuse to estimate for a fallback-only contract, so price the payload instead
+        except Exception as e:
+            fallback = (
+                len(payload) * (FALLBACK_GAS_PER_CALLDATA_BYTE + FALLBACK_GAS_PER_LOG_BYTE) + FALLBACK_GAS_OVERHEAD
+            )
+            logger.warning(f"Could not estimate gas for DataEdge payload ({e}); using {fallback}")
+
+            return fallback
+
+
+    def _get_gas_prices(self, w3: Web3) -> tuple[int, int]:
+        """Get the base fee and max priority fee to price the transaction with."""
+        # Read the base fee from the latest block
+        try:
+            base_fee = int(w3.eth.get_block("latest")["baseFeePerGas"])
+
+        # If the base fee cannot be retrieved, use a fallback value
+        except Exception as e:
+            logger.warning(f"Could not get base fee: {e}")
+            base_fee = w3.to_wei(10, "gwei")
+
+        # Try to get the max priority fee
+        try:
+            max_priority_fee = int(w3.eth.max_priority_fee)
+
+        # If the max priority fee cannot be retrieved, use a fallback value
+        except Exception as e:
+            logger.warning(f"Could not get max priority fee: {e}")
+            max_priority_fee = w3.to_wei(2, "gwei")
+
+        return base_fee, max_priority_fee
+
+
+    def _publish_via_provider(self, rpc_url: str, payload: bytes, private_key: str) -> str:
+        """
+        Publish a payload through a single RPC provider and return the transaction hash.
+
+        Args:
+            rpc_url: RPC provider to use
+            payload: Calldata to publish
+            private_key: Key to sign the transaction with
+
+        Returns:
+            str: Transaction hash, without a 0x prefix
+        """
+        w3 = Web3(Web3.HTTPProvider(rpc_url))
+        if not w3.is_connected():
+            raise ConnectionError(f"Could not connect to RPC provider: {rpc_url}")
+
+        account = w3.eth.account.from_key(private_key)
+        sender_address = Web3.to_checksum_address(account.address)
+
+        gas_limit = self._estimate_gas(w3, sender_address, payload)
+        base_fee, max_priority_fee = self._get_gas_prices(w3)
+
+        transaction = {
+            "from": sender_address,
+            "to": self.contract_address,
+            "value": 0,
+            "data": payload,
+            "nonce": w3.eth.get_transaction_count(sender_address, "pending"),
+            "chainId": self.chain_id,
+            "gas": gas_limit,
+            "maxFeePerGas": base_fee * 2 + max_priority_fee,
+            "maxPriorityFeePerGas": max_priority_fee,
+        }
+
+        signed_tx = w3.eth.account.sign_transaction(transaction, private_key)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        logger.info(f"DataEdge payload sent with hash: 0x{tx_hash.hex()}")
+
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, self.tx_timeout_seconds)
+        if receipt["status"] != 1:
+            raise DataEdgeRevertedError(
+                f"DataEdge transaction reverted: {self.block_explorer_url}/tx/0x{tx_hash.hex()}"
+            )
+
+        return tx_hash.hex()
+
+
+    def post_payload(self, payload: bytes, private_key: str) -> Optional[str]:
+        """
+        Publish a payload, trying each RPC provider in turn until one succeeds.
+
+        Args:
+            payload: Calldata to publish
+            private_key: Key to sign the transaction with
+
+        Returns:
+            Optional[str]: Explorer URL of the transaction, or None if the payload was empty
+        """
+        if not payload:
+            logger.warning("Refusing to publish an empty DataEdge payload.")
+            return None
+
+        logger.info(f"Publishing {len(payload)} byte payload to DataEdge at {self.contract_address}")
+
+        last_error: Optional[Exception] = None
+
+        # Try each provider in turn, since a single provider failing is the common case
+        for rpc_url in self.rpc_providers:
+            try:
+                tx_hash = self._publish_via_provider(rpc_url, payload, private_key)
+                tx_url = f"{self.block_explorer_url}/tx/0x{tx_hash}"
+                logger.info(f"Published DataEdge payload: {tx_url}")
+
+                return tx_url
+
+            # A revert is deterministic, so rotating would only pay for the same failure again
+            except DataEdgeRevertedError:
+                raise
+
+            except Exception as e:
+                logger.warning(f"Failed to publish DataEdge payload via {rpc_url}: {e}")
+                last_error = e
+
+        raise RuntimeError(
+            f"Failed to publish DataEdge payload via all {len(self.rpc_providers)} RPC providers. "
+            f"Last error: {last_error}"
+        )

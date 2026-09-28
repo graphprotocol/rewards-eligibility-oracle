@@ -27,6 +27,11 @@ BLOCKCHAIN_RPC_URLS = [
 ]
 BLOCK_EXPLORER_URL = "https://sepolia.arbiscan.io"
 TX_TIMEOUT_SECONDS = "30"
+# Publishes per-day eligibility metrics to a DataEdge contract for a subgraph to index.
+# Optional: leave the address empty to disable publishing. PUBLISH_DAYS is how many trailing days of
+# the window each run republishes, which lets the next run restate a day that was still in progress.
+DATA_EDGE_CONTRACT_ADDRESS = ""
+DATA_EDGE_PUBLISH_DAYS = "2"
 
 [scheduling]
 SCHEDULED_RUN_TIME = "10:00"

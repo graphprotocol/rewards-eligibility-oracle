@@ -162,6 +162,14 @@ class ConfigLoader:
             "BLOCK_EXPLORER_URL": substituted_config.get("blockchain", {}).get("BLOCK_EXPLORER_URL"),
             "TX_TIMEOUT_SECONDS": to_int(substituted_config.get("blockchain", {}).get("TX_TIMEOUT_SECONDS")),
 
+            # DataEdge publishing. Optional: leaving the address unset disables publishing entirely.
+            "DATA_EDGE_CONTRACT_ADDRESS": substituted_config.get("blockchain", {}).get(
+                "DATA_EDGE_CONTRACT_ADDRESS"
+            ),
+            "DATA_EDGE_PUBLISH_DAYS": to_int(
+                substituted_config.get("blockchain", {}).get("DATA_EDGE_PUBLISH_DAYS")
+            ),
+
             # Scheduling
             "SCHEDULED_RUN_TIME": substituted_config.get("scheduling", {}).get("SCHEDULED_RUN_TIME"),
 

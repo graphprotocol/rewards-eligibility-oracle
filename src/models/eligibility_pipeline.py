@@ -171,7 +171,7 @@ class EligibilityPipeline:
 
     def write_daily_metrics(
         self, daily_metrics: pd.DataFrame, current_date: date, window_start: date, window_end: date
-    ) -> Path:
+    ) -> pd.DataFrame:
         """
         Save the per-day metrics grid for the analysis window to a date-specific directory.
 
@@ -185,7 +185,7 @@ class EligibilityPipeline:
             window_end: Last day of the analysis window
 
         Returns:
-            Path: Path to the saved CSV
+            pd.DataFrame: The grid that was written, so callers can reuse it without rebuilding it
         """
         grid = self.build_daily_metrics_grid(daily_metrics, window_start, window_end)
 
@@ -196,7 +196,7 @@ class EligibilityPipeline:
         grid.to_csv(daily_metrics_path, index=False)
         logger.info(f"Saved {len(grid)} daily metric rows to: {daily_metrics_path}")
 
-        return daily_metrics_path
+        return grid
 
 
     def write_run_metadata(

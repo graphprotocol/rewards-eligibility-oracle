@@ -531,10 +531,12 @@ def test_write_daily_metrics_saves_the_grid_for_the_run_date(
     current_date_val = date(2025, 1, 3)
 
     # Act
-    path = pipeline.write_daily_metrics(daily_metrics_data, current_date_val, WINDOW_START, WINDOW_END)
+    grid = pipeline.write_daily_metrics(daily_metrics_data, current_date_val, WINDOW_START, WINDOW_END)
 
-    # Assert
-    assert path == pipeline.get_date_output_directory(current_date_val) / "indexer_daily_metrics.csv"
+    # Assert: the grid is returned so callers can publish it without rebuilding it
+    assert len(grid) == 6
+
+    path = pipeline.get_date_output_directory(current_date_val) / "indexer_daily_metrics.csv"
     assert path.exists()
 
     written = pd.read_csv(path)

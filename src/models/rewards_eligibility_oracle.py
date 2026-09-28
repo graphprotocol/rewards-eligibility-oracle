@@ -12,22 +12,104 @@ import sys
 import time
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Optional
+
+import pandas as pd
 
 # Import data access utilities with absolute import
 from src.models.bigquery_provider import BigQueryProvider
 from src.models.blockchain_client import BlockchainClient
+from src.models.data_edge_client import DataEdgeClient
 from src.models.eligibility_pipeline import EligibilityPipeline
 from src.utils.circuit_breaker import CircuitBreaker
 from src.utils.configuration import (
     credential_manager,
     load_config,
 )
+from src.utils.data_edge_codec import encode_payload
 from src.utils.opsgenie import send_opsgenie_alert_safe
 from src.utils.slack_notifier import create_slack_notifier
 
 # Set up basic logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# Trailing days of the window republished when the config does not say, so that the next run restates
+# the day that was still in progress when this one read it
+DEFAULT_DATA_EDGE_PUBLISH_DAYS = 2
+
+
+def publish_daily_metrics_to_data_edge(
+    config: dict,
+    daily_metrics_grid: pd.DataFrame,
+    run_date: date,
+    window_start: date,
+    window_end: date,
+    indexers_evaluated: int,
+    indexers_eligible: int,
+) -> Optional[str]:
+    """
+    Publish the most recent days of the metrics grid to the DataEdge contract, for a subgraph to index.
+
+    Publishing is best-effort by design. It must never fail a run, since the payload is diagnostic and
+    the transactions that renew eligibility matter more; a failure is logged and alerted on instead.
+    Publishing is skipped entirely when no DataEdge contract is configured.
+
+    Args:
+        config: Flat configuration for the run
+        daily_metrics_grid: Dense per-indexer, per-day metrics for the analysis window
+        run_date: The date of the run
+        window_start: First day of the analysis window
+        window_end: Last day of the analysis window
+        indexers_evaluated: Number of indexers the run considered
+        indexers_eligible: Number of indexers the run found eligible
+
+    Returns:
+        Optional[str]: Explorer URL of the publishing transaction, or None if skipped or failed
+    """
+    contract_address = config.get("DATA_EDGE_CONTRACT_ADDRESS")
+    if not contract_address:
+        logger.info("DataEdge publishing disabled (no contract address configured)")
+        return None
+
+    try:
+        payload = encode_payload(
+            run_date=run_date,
+            window_start=window_start,
+            window_end=window_end,
+            criteria={
+                "MIN_ONLINE_DAYS": config["MIN_ONLINE_DAYS"],
+                "MIN_SUBGRAPHS": config["MIN_SUBGRAPHS"],
+                "MAX_LATENCY_MS": config["MAX_LATENCY_MS"],
+                "MAX_BLOCKS_BEHIND": config["MAX_BLOCKS_BEHIND"],
+            },
+            daily_rows=daily_metrics_grid.to_dict("records"),
+            indexers_evaluated=indexers_evaluated,
+            indexers_eligible=indexers_eligible,
+            publish_days=config.get("DATA_EDGE_PUBLISH_DAYS") or DEFAULT_DATA_EDGE_PUBLISH_DAYS,
+        )
+
+        data_edge_client = DataEdgeClient(
+            rpc_providers=config["BLOCKCHAIN_RPC_URLS"],
+            contract_address=contract_address,
+            chain_id=config["BLOCKCHAIN_CHAIN_ID"],
+            block_explorer_url=config["BLOCK_EXPLORER_URL"],
+            tx_timeout_seconds=config["TX_TIMEOUT_SECONDS"],
+        )
+
+        return data_edge_client.post_payload(payload, config["PRIVATE_KEY"])
+
+    # A failure here leaves the run's artifacts on disk, so the data is recoverable and can be re-published
+    except Exception as e:
+        logger.error(f"Failed to publish daily metrics to DataEdge: {e}", exc_info=True)
+        send_opsgenie_alert_safe(
+            api_key=config.get("OPSGENIE_API_KEY"),
+            message="Rewards Oracle: DataEdge publishing failed",
+            description=f"Eligibility renewal was unaffected. Failed to publish metrics: {e}",
+            priority="P4",
+        )
+
+        return None
 
 
 def main(run_date_override: date = None):
@@ -141,7 +223,7 @@ def main(run_date_override: date = None):
             logger.info(f"Found {len(eligible_indexers)} eligible indexers after processing.")
 
             # Retain the per-day detail behind the decision, alongside the criteria that produced it
-            pipeline.write_daily_metrics(
+            daily_metrics_grid = pipeline.write_daily_metrics(
                 daily_metrics=daily_metrics,
                 current_date=current_run_date,
                 window_start=start_date,
@@ -158,6 +240,18 @@ def main(run_date_override: date = None):
                     "MAX_BLOCKS_BEHIND": config["MAX_BLOCKS_BEHIND"],
                 },
                 source="bigquery",
+                indexers_evaluated=len(eligibility_data),
+                indexers_eligible=len(eligible_indexers),
+            )
+
+            # Publish before submitting renewals, so that a failed submission still leaves the run's
+            # diagnostics on chain for the indexers that need them most
+            publish_daily_metrics_to_data_edge(
+                config=config,
+                daily_metrics_grid=daily_metrics_grid,
+                run_date=current_run_date,
+                window_start=start_date,
+                window_end=end_date,
                 indexers_evaluated=len(eligibility_data),
                 indexers_eligible=len(eligible_indexers),
             )

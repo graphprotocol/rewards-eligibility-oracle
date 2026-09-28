@@ -1,0 +1,224 @@
+"""
+Unit tests for the DataEdgeClient.
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.models.data_edge_client import (
+    FALLBACK_GAS_OVERHEAD,
+    DataEdgeClient,
+    DataEdgeRevertedError,
+)
+
+# --- Test Constants ---
+PRIMARY_RPC = "https://primary.example.com"
+BACKUP_RPC = "https://backup.example.com"
+CONTRACT_ADDRESS = "0x62c2305739cc75f19a3a6d52387ceb3690d99a99"
+SENDER_ADDRESS = "0x32bbd16a94ebb289edceebe77f35acc82664157b"
+EXPLORER_URL = "https://sepolia.arbiscan.io"
+CHAIN_ID = 421614
+PRIVATE_KEY = "0xfakekey"
+PAYLOAD = b"REfake-payload"
+TX_HASH_HEX = "abc123"
+
+
+def _build_web3(is_connected: bool = True, receipt_status: int = 1, estimate_gas_fails: bool = False):
+    """Build a mock Web3 instance that behaves like a healthy node unless told otherwise."""
+    w3 = MagicMock()
+    w3.is_connected.return_value = is_connected
+    w3.eth.account.from_key.return_value = MagicMock(address=SENDER_ADDRESS)
+
+    if estimate_gas_fails:
+        w3.eth.estimate_gas.side_effect = Exception("execution reverted during estimation")
+    else:
+        w3.eth.estimate_gas.return_value = 500_000
+
+    w3.eth.get_block.return_value = {"baseFeePerGas": 100}
+    w3.eth.max_priority_fee = 10
+    w3.eth.get_transaction_count.return_value = 7
+    w3.eth.send_raw_transaction.return_value = MagicMock(hex=MagicMock(return_value=TX_HASH_HEX))
+    w3.eth.wait_for_transaction_receipt.return_value = {"status": receipt_status}
+    w3.to_wei.return_value = 1_000_000_000
+
+    return w3
+
+
+@pytest.fixture
+def mock_web3():
+    """Patches Web3 in the client module and yields the patched class."""
+    with patch("src.models.data_edge_client.Web3") as mock_web3_cls:
+        mock_web3_cls.to_checksum_address.side_effect = lambda address: address
+        yield mock_web3_cls
+
+
+@pytest.fixture
+def client(mock_web3: MagicMock) -> DataEdgeClient:
+    """Provides a client configured with a primary and a backup provider."""
+    return DataEdgeClient(
+        rpc_providers=[PRIMARY_RPC, BACKUP_RPC],
+        contract_address=CONTRACT_ADDRESS,
+        chain_id=CHAIN_ID,
+        block_explorer_url=f"{EXPLORER_URL}/",
+        tx_timeout_seconds=30,
+    )
+
+
+class TestInitialization:
+    """Tests for the __init__ method."""
+
+
+    def test_init_requires_at_least_one_rpc_provider(self, mock_web3: MagicMock):
+        """
+        Tests that a client with nowhere to publish is rejected at construction.
+        """
+        with pytest.raises(ValueError, match="At least one RPC provider"):
+            DataEdgeClient(
+                rpc_providers=[],
+                contract_address=CONTRACT_ADDRESS,
+                chain_id=CHAIN_ID,
+                block_explorer_url=EXPLORER_URL,
+                tx_timeout_seconds=30,
+            )
+
+
+    def test_init_normalises_the_explorer_url(self, client: DataEdgeClient):
+        """
+        Tests that a trailing slash on the explorer URL does not produce a doubled separator in links.
+        """
+        assert client.block_explorer_url == EXPLORER_URL
+
+
+class TestPostPayload:
+    """Tests for the post_payload method."""
+
+
+    def test_post_payload_publishes_via_the_first_healthy_provider(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests the happy path, checking that the payload is sent as calldata to the DataEdge contract.
+        """
+        # Arrange
+        w3 = _build_web3()
+        mock_web3.return_value = w3
+
+        # Act
+        tx_url = client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert: the caller gets a link to the transaction
+        assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+
+        # Assert: only the primary provider was used
+        mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+        # Assert: the payload travels as calldata to the contract, carrying no value
+        transaction = w3.eth.account.sign_transaction.call_args.args[0]
+        assert transaction["to"] == CONTRACT_ADDRESS
+        assert transaction["data"] == PAYLOAD
+        assert transaction["value"] == 0
+        assert transaction["chainId"] == CHAIN_ID
+        assert transaction["nonce"] == 7
+
+
+    def test_post_payload_rotates_to_the_backup_provider(self, client: DataEdgeClient, mock_web3: MagicMock):
+        """
+        Tests that an unreachable provider is skipped rather than failing the publish.
+        """
+        # Arrange: the primary provider is unreachable
+        unreachable = _build_web3(is_connected=False)
+        healthy = _build_web3()
+        mock_web3.side_effect = [unreachable, healthy]
+
+        # Act
+        tx_url = client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert
+        assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+        assert [call.args[0] for call in mock_web3.HTTPProvider.call_args_list] == [PRIMARY_RPC, BACKUP_RPC]
+        healthy.eth.send_raw_transaction.assert_called_once()
+
+
+    def test_post_payload_fails_when_every_provider_fails(self, client: DataEdgeClient, mock_web3: MagicMock):
+        """
+        Tests that exhausting the providers raises, so the caller can alert on it.
+        """
+        # Arrange
+        mock_web3.return_value = _build_web3(is_connected=False)
+
+        # Act & Assert
+        with pytest.raises(RuntimeError, match="all 2 RPC providers"):
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+
+    def test_post_payload_does_not_retry_a_reverted_transaction(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a revert stops the publish immediately. Rotating would mine, and pay for, the same
+        failing transaction once per configured provider.
+        """
+        # Arrange
+        w3 = _build_web3(receipt_status=0)
+        mock_web3.return_value = w3
+
+        # Act & Assert
+        with pytest.raises(DataEdgeRevertedError, match="reverted"):
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert: the transaction was sent exactly once, not once per provider
+        assert w3.eth.send_raw_transaction.call_count == 1
+        mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    def test_post_payload_skips_an_empty_payload(self, client: DataEdgeClient, mock_web3: MagicMock):
+        """
+        Tests that nothing is published when there is nothing to say, rather than paying for an empty
+        transaction.
+        """
+        # Act
+        result = client.post_payload(b"", PRIVATE_KEY)
+
+        # Assert
+        assert result is None
+        mock_web3.HTTPProvider.assert_not_called()
+
+
+    def test_post_payload_prices_the_payload_when_estimation_is_refused(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a provider refusing to estimate gas for a fallback-only contract does not stop the
+        publish, since the cost of the payload can be priced from its length.
+        """
+        # Arrange
+        w3 = _build_web3(estimate_gas_fails=True)
+        mock_web3.return_value = w3
+
+        # Act
+        client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert: the fallback limit covers the overhead plus the payload itself
+        transaction = w3.eth.account.sign_transaction.call_args.args[0]
+        assert transaction["gas"] > FALLBACK_GAS_OVERHEAD
+        assert transaction["gas"] == FALLBACK_GAS_OVERHEAD + len(PAYLOAD) * 24
+
+
+    def test_post_payload_applies_a_buffer_to_the_estimated_gas(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that the gas limit leaves headroom above the estimate, which is quoted against a
+        different block than the one the transaction lands in.
+        """
+        # Arrange
+        w3 = _build_web3()
+        mock_web3.return_value = w3
+
+        # Act
+        client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert
+        transaction = w3.eth.account.sign_transaction.call_args.args[0]
+        assert transaction["gas"] == 625_000

@@ -36,6 +36,21 @@ class DataEdgeRevertedError(Exception):
     """
 
 
+class DataEdgePendingError(Exception):
+    """
+    Raised when a publishing transaction was broadcast but its outcome could not be established.
+
+    The transaction may still be mined, so it is not retried on another provider. Retrying would
+    either duplicate the publish under the next nonce, or be rejected as an underpriced replacement,
+    and in neither case could the caller tell which transaction survived. Carries the transaction
+    hash so the outcome can be checked by hand.
+    """
+
+    def __init__(self, message: str, tx_url: str):
+        super().__init__(message)
+        self.tx_url = tx_url
+
+
 class DataEdgeClient:
     """Publishes opaque payloads to a DataEdge contract, rotating RPC providers on failure."""
 
@@ -152,15 +167,25 @@ class DataEdgeClient:
         }
 
         signed_tx = w3.eth.account.sign_transaction(transaction, private_key)
+
+        # Everything up to here can be retried freely, because nothing has reached the network yet
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
         tx_hash_hex = tx_hash.hex().removeprefix("0x")
+        tx_url = f"{self.block_explorer_url}/tx/0x{tx_hash_hex}"
         logger.info(f"DataEdge payload sent with hash: 0x{tx_hash_hex}")
 
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, self.tx_timeout_seconds)
+        # Past the broadcast the transaction may be mined whatever happens next, so a failed receipt
+        # is an unknown outcome rather than a failed publish
+        try:
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, self.tx_timeout_seconds)
+
+        except Exception as e:
+            raise DataEdgePendingError(
+                f"DataEdge transaction broadcast but its outcome is unknown ({e}): {tx_url}", tx_url
+            ) from e
+
         if receipt["status"] != 1:
-            raise DataEdgeRevertedError(
-                f"DataEdge transaction reverted: {self.block_explorer_url}/tx/0x{tx_hash_hex}"
-            )
+            raise DataEdgeRevertedError(f"DataEdge transaction reverted: {tx_url}")
 
         return tx_hash_hex
 
@@ -193,8 +218,9 @@ class DataEdgeClient:
 
                 return tx_url
 
-            # A revert is deterministic, so rotating would only pay for the same failure again
-            except DataEdgeRevertedError:
+            # A revert is deterministic, so rotating would only pay for the same failure again, and a
+            # broadcast transaction may still be mined, so rotating would duplicate or underprice it
+            except (DataEdgeRevertedError, DataEdgePendingError):
                 raise
 
             except Exception as e:

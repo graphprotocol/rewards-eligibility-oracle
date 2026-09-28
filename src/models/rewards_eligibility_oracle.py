@@ -19,7 +19,7 @@ import pandas as pd
 # Import data access utilities with absolute import
 from src.models.bigquery_provider import BigQueryProvider
 from src.models.blockchain_client import BlockchainClient
-from src.models.data_edge_client import DataEdgeClient
+from src.models.data_edge_client import DataEdgeClient, DataEdgePendingError
 from src.models.eligibility_pipeline import EligibilityPipeline
 from src.utils.circuit_breaker import CircuitBreaker
 from src.utils.configuration import (
@@ -103,6 +103,18 @@ def publish_daily_metrics_to_data_edge(
 
         return data_edge_client.post_payload(payload, config["PRIVATE_KEY"])
 
+    # The transaction reached the network, so report it as unresolved rather than failed
+    except DataEdgePendingError as e:
+        logger.warning(f"Daily metrics transaction broadcast but unconfirmed: {e}")
+        send_opsgenie_alert_safe(
+            api_key=config.get("OPSGENIE_API_KEY"),
+            message="Rewards Oracle: DataEdge publishing unconfirmed",
+            description=f"Eligibility renewal was unaffected. The transaction may still be mined: {e}",
+            priority="P4",
+        )
+
+        return e.tx_url
+
     # A failure here leaves the run's artifacts on disk, so the data is recoverable and can be re-published
     except Exception as e:
         logger.error(f"Failed to publish daily metrics to DataEdge: {e}", exc_info=True)
@@ -171,6 +183,11 @@ def main(run_date_override: date = None):
 
         # Initialize pipeline early to check for cached data
         pipeline = EligibilityPipeline(project_root=project_root_path)
+
+        # Only a run that produced per-day metrics publishes them, so a cache hit does not republish
+        # what the run it is replaying already published
+        daily_metrics_grid = None
+        indexers_evaluated = 0
 
         # Check for fresh cached data first (30 minutes by default)
         cache_max_age_minutes = int(config.get("CACHE_MAX_AGE_MINUTES", 30))
@@ -247,18 +264,7 @@ def main(run_date_override: date = None):
                 indexers_evaluated=len(eligibility_data),
                 indexers_eligible=len(eligible_indexers),
             )
-
-            # Publish before submitting renewals, so that a failed submission still leaves the run's
-            # diagnostics on chain for the indexers that need them most
-            publish_daily_metrics_to_data_edge(
-                config=config,
-                daily_metrics_grid=daily_metrics_grid,
-                run_date=current_run_date,
-                window_start=start_date,
-                window_end=end_date,
-                indexers_evaluated=len(eligibility_data),
-                indexers_eligible=len(eligible_indexers),
-            )
+            indexers_evaluated = len(eligibility_data)
 
         # Clean up old data directories (run this regardless of cache hit/miss)
         pipeline.clean_old_date_directories(config["MAX_AGE_BEFORE_DELETION"])
@@ -274,14 +280,37 @@ def main(run_date_override: date = None):
             tx_timeout_seconds=config["TX_TIMEOUT_SECONDS"],
             slack_notifier=slack_notifier,
         )
-        transaction_links, rpc_provider_used = blockchain_client.batch_renew_indexer_rewards_eligibility(
-            indexer_addresses=eligible_indexers,
-            private_key=config["PRIVATE_KEY"],
-            chain_id=config["BLOCKCHAIN_CHAIN_ID"],
-            contract_function=config["BLOCKCHAIN_FUNCTION_NAME"],
-            batch_size=config["BATCH_SIZE"],
-            replace=True,
-        )
+        # Renewals replace the sender's oldest pending transaction, which would evict a DataEdge
+        # publish still in flight. Submitting them first leaves nothing of ours pending to evict.
+        submission_error = None
+
+        try:
+            transaction_links, rpc_provider_used = blockchain_client.batch_renew_indexer_rewards_eligibility(
+                indexer_addresses=eligible_indexers,
+                private_key=config["PRIVATE_KEY"],
+                chain_id=config["BLOCKCHAIN_CHAIN_ID"],
+                contract_function=config["BLOCKCHAIN_FUNCTION_NAME"],
+                batch_size=config["BATCH_SIZE"],
+                replace=True,
+            )
+
+        # Hold the failure so the run still publishes, where the diagnostics matter most, then re-raise
+        except Exception as e:
+            submission_error = e
+
+        if daily_metrics_grid is not None:
+            publish_daily_metrics_to_data_edge(
+                config=config,
+                daily_metrics_grid=daily_metrics_grid,
+                run_date=current_run_date,
+                window_start=start_date,
+                window_end=end_date,
+                indexers_evaluated=indexers_evaluated,
+                indexers_eligible=len(eligible_indexers),
+            )
+
+        if submission_error is not None:
+            raise submission_error
 
         # Calculate execution time and send success notification
         execution_time = time.time() - start_time

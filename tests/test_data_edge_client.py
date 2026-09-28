@@ -9,6 +9,7 @@ import pytest
 from src.models.data_edge_client import (
     FALLBACK_GAS_OVERHEAD,
     DataEdgeClient,
+    DataEdgePendingError,
     DataEdgeRevertedError,
 )
 
@@ -170,6 +171,53 @@ class TestPostPayload:
         # Assert: the transaction was sent exactly once, not once per provider
         assert w3.eth.send_raw_transaction.call_count == 1
         mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    def test_post_payload_does_not_retry_after_an_ambiguous_broadcast(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a receipt failure after a successful broadcast stops the publish. The transaction
+        may still be mined, so rotating would either duplicate it under the next nonce or be rejected
+        as an underpriced replacement, with no way to tell which survived.
+        """
+        # Arrange: the broadcast lands but the receipt never arrives
+        w3 = _build_web3()
+        w3.eth.wait_for_transaction_receipt.side_effect = Exception("timed out waiting for receipt")
+        mock_web3.return_value = w3
+
+        # Act & Assert
+        with pytest.raises(DataEdgePendingError, match="outcome is unknown") as excinfo:
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert: the hash is retained so the outcome can be checked by hand
+        assert excinfo.value.tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+
+        # Assert: broadcast exactly once, on the first provider only
+        assert w3.eth.send_raw_transaction.call_count == 1
+        mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    def test_post_payload_still_rotates_on_a_pre_broadcast_failure(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a failure before anything reaches the network is still retried on the next provider,
+        since nothing is in flight to duplicate.
+        """
+        # Arrange: the primary provider fails while reading the nonce, before any broadcast
+        failing = _build_web3()
+        failing.eth.get_transaction_count.side_effect = Exception("provider error")
+        healthy = _build_web3()
+        mock_web3.side_effect = [failing, healthy]
+
+        # Act
+        tx_url = client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert
+        assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+        failing.eth.send_raw_transaction.assert_not_called()
+        healthy.eth.send_raw_transaction.assert_called_once()
 
 
     def test_post_payload_skips_an_empty_payload(self, client: DataEdgeClient, mock_web3: MagicMock):

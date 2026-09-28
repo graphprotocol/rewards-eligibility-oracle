@@ -406,19 +406,58 @@ def test_main_publishes_daily_metrics_when_a_contract_is_configured(oracle_conte
     assert private_key == MOCK_CONFIG["PRIVATE_KEY"]
 
 
-def test_main_publishes_before_submitting_renewals(oracle_context):
+def test_main_publishes_after_submitting_renewals(oracle_context):
     """
-    Test that metrics are published before renewals are submitted, so that a failed submission still
-    leaves the run's diagnostics on chain for the indexers that need them.
+    Test that renewals are submitted before metrics are published. Renewals replace the sender's
+    oldest pending transaction, so a publish still in flight would be evicted by them.
     """
     ctx = oracle_context
     ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
-    ctx["client"].batch_renew_indexer_rewards_eligibility.side_effect = Exception("submission error")
 
-    with pytest.raises(SystemExit):
+    call_order = []
+    ctx["client"].batch_renew_indexer_rewards_eligibility.side_effect = lambda **kwargs: (
+        call_order.append("renew") or (["http://tx-link"], "https://test-rpc.com")
+    )
+    ctx["data_edge"].post_payload.side_effect = lambda *args: call_order.append("publish")
+
+    ctx["main"]()
+
+    assert call_order == ["renew", "publish"]
+
+
+def test_main_still_publishes_when_renewal_submission_fails(oracle_context):
+    """
+    Test that a failed submission still leaves the run's diagnostics on chain, since that is when the
+    indexers reading them most need them, and that the run still fails afterwards.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    error = Exception("submission error")
+    ctx["client"].batch_renew_indexer_rewards_eligibility.side_effect = error
+
+    with pytest.raises(SystemExit) as excinfo:
         ctx["main"]()
 
     ctx["data_edge"].post_payload.assert_called_once()
+
+    # The submission failure is still what fails the run, reported against its own stage
+    assert excinfo.value.code == 1
+    ctx["logger_error"].assert_any_call(f"Oracle failed at stage 'Blockchain Submission': {error}", exc_info=True)
+
+
+def test_main_does_not_publish_on_the_cache_path(oracle_context):
+    """
+    Test that a run replaying cached data does not republish what the run it replays already published.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["pipeline"].has_fresh_processed_data.return_value = True
+
+    ctx["main"]()
+
+    ctx["data_edge"].post_payload.assert_not_called()
+    # Renewals still run from the cached list
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
 
 
 def test_main_survives_a_data_edge_publishing_failure(oracle_context):

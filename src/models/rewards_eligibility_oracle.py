@@ -86,7 +86,11 @@ def publish_daily_metrics_to_data_edge(
             daily_rows=daily_metrics_grid.to_dict("records"),
             indexers_evaluated=indexers_evaluated,
             indexers_eligible=indexers_eligible,
-            publish_days=config.get("DATA_EDGE_PUBLISH_DAYS") or DEFAULT_DATA_EDGE_PUBLISH_DAYS,
+            publish_days=(
+                config["DATA_EDGE_PUBLISH_DAYS"]
+                if config.get("DATA_EDGE_PUBLISH_DAYS") is not None
+                else DEFAULT_DATA_EDGE_PUBLISH_DAYS
+            ),
         )
 
         data_edge_client = DataEdgeClient(

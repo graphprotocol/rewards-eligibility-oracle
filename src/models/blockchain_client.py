@@ -152,7 +152,7 @@ class BlockchainClient:
     def _connect_to_rpc(self) -> None:
         """Connect to the next available RPC provider."""
         initial_index = self.current_rpc_index
-        for i in range(len(self.rpc_providers)):
+        for _ in range(len(self.rpc_providers)):
             rpc_url = self.rpc_providers[self.current_rpc_index]
             provider_type = "primary" if self.current_rpc_index == 0 else f"backup #{self.current_rpc_index}"
 

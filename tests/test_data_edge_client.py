@@ -25,10 +25,13 @@ PAYLOAD = b"REfake-payload"
 TX_HASH_HEX = "abc123"
 
 
-def _build_web3(is_connected: bool = True, receipt_status: int = 1, estimate_gas_fails: bool = False):
+def _build_web3(
+    is_connected: bool = True, receipt_status: int = 1, estimate_gas_fails: bool = False, has_code: bool = True
+):
     """Build a mock Web3 instance that behaves like a healthy node unless told otherwise."""
     w3 = MagicMock()
     w3.is_connected.return_value = is_connected
+    w3.eth.get_code.return_value = b"\x60\x80" if has_code else b""
     w3.eth.account.from_key.return_value = MagicMock(address=SENDER_ADDRESS)
 
     if estimate_gas_fails:
@@ -218,6 +221,24 @@ class TestPostPayload:
         assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
         failing.eth.send_raw_transaction.assert_not_called()
         healthy.eth.send_raw_transaction.assert_called_once()
+
+
+    def test_post_payload_refuses_an_address_with_no_contract_code(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a misconfigured address is reported rather than published to. An address with no code
+        accepts the payload as a plain transfer and emits nothing, which would otherwise look like success.
+        """
+        # Arrange
+        w3 = _build_web3(has_code=False)
+        mock_web3.return_value = w3
+
+        # Act & Assert
+        with pytest.raises(RuntimeError, match="No contract code"):
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        w3.eth.send_raw_transaction.assert_not_called()
 
 
     def test_post_payload_skips_an_empty_payload(self, client: DataEdgeClient, mock_web3: MagicMock):

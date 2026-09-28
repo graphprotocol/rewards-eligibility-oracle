@@ -148,6 +148,11 @@ class DataEdgeClient:
         if not w3.is_connected():
             raise ConnectionError(f"Could not connect to RPC provider: {rpc_url}")
 
+        # An address with no code accepts the payload as a plain transfer and emits nothing, so a wrong
+        # address would otherwise look like a successful publish on every run
+        if not w3.eth.get_code(self.contract_address):
+            raise ValueError(f"No contract code at DataEdge address {self.contract_address}")
+
         account = w3.eth.account.from_key(private_key)
         sender_address = Web3.to_checksum_address(account.address)
 

@@ -158,25 +158,25 @@ class TestInitialization:
         assert provider.max_blocks_behind == MOCK_MAX_BLOCKS_BEHIND
 
 
-class TestGetIndexerEligibilityQuery:
-    """Tests for the _get_indexer_eligibility_query method."""
+class TestGetIndexerDailyMetricsQuery:
+    """Tests for the _get_indexer_daily_metrics_query method."""
 
 
-    def test_get_indexer_eligibility_query_matches_snapshot(self, provider: BigQueryProvider, snapshot):
+    def test_get_indexer_daily_metrics_query_matches_snapshot(self, provider: BigQueryProvider, snapshot):
         """
         Tests that the generated SQL query matches the stored snapshot,
         preventing unintended changes to the query logic.
         """
-        query = provider._get_indexer_eligibility_query(start_date=START_DATE, end_date=END_DATE)
-        snapshot.assert_match(query, "indexer_eligibility_query.sql")
+        query = provider._get_indexer_daily_metrics_query(start_date=START_DATE, end_date=END_DATE)
+        snapshot.assert_match(query, "indexer_daily_metrics_query.sql")
 
 
-    def test_get_indexer_eligibility_query_only_counts_subgraphs_with_a_qualifying_query(
+    def test_get_indexer_daily_metrics_query_only_counts_subgraphs_with_a_qualifying_query(
         self, mock_bpd: MagicMock
     ):
         """
-        Runs the query on an in-memory SQLite table to check that a subgraph only counts towards
-        min_subgraphs when the indexer served a qualifying query on it that day.
+        Runs the query and the aggregation on an in-memory SQLite table to check that a subgraph only
+        counts towards min_subgraphs when the indexer served a qualifying query on it that day.
         """
         provider = BigQueryProvider(
             project=MOCK_PROJECT,
@@ -208,9 +208,11 @@ class TestGetIndexerEligibilityQuery:
             "response_time_ms INTEGER, blocks_behind INTEGER)"
         )
         connection.executemany("INSERT INTO query_logs VALUES (?, ?, ?, ?, ?, ?)", rows)
-        query = provider._get_indexer_eligibility_query(start_date=START_DATE, end_date=START_DATE)
-        result = pd.read_sql_query(query, connection).set_index("indexer")
+        query = provider._get_indexer_daily_metrics_query(start_date=START_DATE, end_date=START_DATE)
+        daily_metrics = pd.read_sql_query(query, connection)
         connection.close()
+
+        result = provider.aggregate_daily_metrics(daily_metrics).set_index("indexer")
 
         assert result.loc["0xpartial", "total_good_days_online"] == 0
         assert result.loc["0xpartial", "eligible_for_indexing_rewards"] == 0
@@ -218,17 +220,62 @@ class TestGetIndexerEligibilityQuery:
         assert result.loc["0xfull", "eligible_for_indexing_rewards"] == 1
 
 
-    def test_get_indexer_eligibility_query_handles_single_day_range(self, provider: BigQueryProvider):
+    def test_get_indexer_daily_metrics_query_counts_each_failed_quality_bar(self, mock_bpd: MagicMock):
+        """
+        Runs the query on an in-memory SQLite table to check that every breached quality bar is counted,
+        including for a single response that breaches more than one at the same time.
+        """
+        provider = BigQueryProvider(
+            project=MOCK_PROJECT,
+            location=MOCK_LOCATION,
+            table_name="query_logs",
+            min_online_days=1,
+            min_subgraphs=1,
+            max_latency_ms=MOCK_MAX_LATENCY_MS,
+            max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
+        )
+        day = START_DATE.strftime("%Y-%m-%d")
+
+        # One qualifying response, one slow, and one that is slow, stale and unsuccessful at once
+        rows = [
+            (day, "0xmixed", "sg0", "200 OK", 100, 0),
+            (day, "0xmixed", "sg1", "200 OK", MOCK_MAX_LATENCY_MS, 0),
+            (day, "0xmixed", "sg2", "500 Internal Server Error", MOCK_MAX_LATENCY_MS, MOCK_MAX_BLOCKS_BEHIND),
+        ]
+
+        # Run the generated query against the rows
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            "CREATE TABLE query_logs (day_partition TEXT, indexer TEXT, deployment TEXT, status TEXT, "
+            "response_time_ms INTEGER, blocks_behind INTEGER)"
+        )
+        connection.executemany("INSERT INTO query_logs VALUES (?, ?, ?, ?, ?, ?)", rows)
+        query = provider._get_indexer_daily_metrics_query(start_date=START_DATE, end_date=START_DATE)
+        result = pd.read_sql_query(query, connection).set_index("indexer")
+        connection.close()
+
+        assert result.loc["0xmixed", "query_attempts"] == 3
+        assert result.loc["0xmixed", "qualifying_queries"] == 1
+        assert result.loc["0xmixed", "qualifying_subgraphs"] == 1
+        assert result.loc["0xmixed", "is_online_day"] == 1
+
+        # The failure counts overlap: the third response breaches all three bars
+        assert result.loc["0xmixed", "failed_status"] == 1
+        assert result.loc["0xmixed", "failed_latency"] == 2
+        assert result.loc["0xmixed", "failed_blocks_behind"] == 1
+
+
+    def test_get_indexer_daily_metrics_query_handles_single_day_range(self, provider: BigQueryProvider):
         """
         Tests that the query is constructed correctly when start and end dates are the same,
         covering an edge case for a single-day analysis period.
         """
-        query = provider._get_indexer_eligibility_query(start_date=SINGLE_DATE, end_date=SINGLE_DATE)
+        query = provider._get_indexer_daily_metrics_query(start_date=SINGLE_DATE, end_date=SINGLE_DATE)
         assert isinstance(query, str)
         assert f"BETWEEN '{SINGLE_DATE.strftime('%Y-%m-%d')}' AND '{SINGLE_DATE.strftime('%Y-%m-%d')}'" in query
 
 
-    def test_get_indexer_eligibility_query_handles_invalid_date_range(self, provider: BigQueryProvider):
+    def test_get_indexer_daily_metrics_query_handles_invalid_date_range(self, provider: BigQueryProvider):
         """
         Tests that the query is constructed correctly even with a logically invalid
         date range (start > end), which should result in an empty set from BigQuery
@@ -236,10 +283,94 @@ class TestGetIndexerEligibilityQuery:
         """
         invalid_start_date = date(2025, 1, 28)
         invalid_end_date = date(2025, 1, 1)
-        query = provider._get_indexer_eligibility_query(start_date=invalid_start_date, end_date=invalid_end_date)
+        query = provider._get_indexer_daily_metrics_query(start_date=invalid_start_date, end_date=invalid_end_date)
         assert isinstance(query, str)
         assert invalid_start_date.strftime("%Y-%m-%d") in query
         assert invalid_end_date.strftime("%Y-%m-%d") in query
+
+
+class TestAggregateDailyMetrics:
+    """Tests for the aggregate_daily_metrics method."""
+
+
+    def test_aggregate_daily_metrics_sums_the_window_and_applies_min_online_days(self, provider: BigQueryProvider):
+        """
+        Tests that per-day rows are collapsed into per-indexer totals and that eligibility follows
+        min_online_days rather than query volume.
+        """
+        # 0xabove qualifies on 5 light days, 0xbelow serves far more queries but qualifies on only 1 day
+        days = ["2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04", "2025-01-05"]
+        daily_metrics = pd.DataFrame(
+            {
+                "day": days + days,
+                "indexer": ["0xabove"] * 5 + ["0xbelow"] * 5,
+                "query_attempts": [10] * 5 + [900] * 5,
+                "qualifying_queries": [1] * 5 + [5, 0, 0, 0, 0],
+                "qualifying_subgraphs": [1] * 5 + [2, 0, 0, 0, 0],
+                "failed_status": [9] * 5 + [895, 900, 900, 900, 900],
+                "failed_latency": [0] * 10,
+                "failed_blocks_behind": [0] * 10,
+                "is_online_day": [1] * 5 + [1, 0, 0, 0, 0],
+                "unique_good_response_subgraphs": [3] * 5 + [2] * 5,
+            }
+        )
+
+        result = provider.aggregate_daily_metrics(daily_metrics).set_index("indexer")
+
+        assert result.loc["0xabove", "query_attempts"] == 50
+        assert result.loc["0xabove", "good_responses"] == 5
+        assert result.loc["0xabove", "total_good_days_online"] == MOCK_MIN_ONLINE_DAYS
+        assert result.loc["0xabove", "unique_good_response_subgraphs"] == 3
+        assert result.loc["0xabove", "eligible_for_indexing_rewards"] == 1
+
+        # Volume does not substitute for qualifying days
+        assert result.loc["0xbelow", "query_attempts"] == 4500
+        assert result.loc["0xbelow", "good_responses"] == 5
+        assert result.loc["0xbelow", "total_good_days_online"] == 1
+        assert result.loc["0xbelow", "eligible_for_indexing_rewards"] == 0
+
+
+    def test_aggregate_daily_metrics_keeps_missing_subgraph_counts_null(self, provider: BigQueryProvider):
+        """
+        Tests that an indexer without a single qualifying query keeps a null subgraph count, which is
+        how BigQuery reports it, rather than having it coerced to zero.
+        """
+        daily_metrics = pd.DataFrame(
+            {
+                "day": ["2025-01-01"],
+                "indexer": ["0xnone"],
+                "query_attempts": [42],
+                "qualifying_queries": [0],
+                "qualifying_subgraphs": [0],
+                "failed_status": [0],
+                "failed_latency": [0],
+                "failed_blocks_behind": [42],
+                "is_online_day": [0],
+                "unique_good_response_subgraphs": [None],
+            }
+        )
+
+        result = provider.aggregate_daily_metrics(daily_metrics)
+
+        assert pd.isna(result.loc[0, "unique_good_response_subgraphs"])
+        assert result.loc[0, "eligible_for_indexing_rewards"] == 0
+
+
+    def test_aggregate_daily_metrics_returns_empty_frame_with_expected_columns(self, provider: BigQueryProvider):
+        """
+        Tests that an empty window still produces the summary structure the pipeline validates against.
+        """
+        result = provider.aggregate_daily_metrics(pd.DataFrame())
+
+        assert result.empty
+        assert list(result.columns) == [
+            "indexer",
+            "query_attempts",
+            "good_responses",
+            "total_good_days_online",
+            "unique_good_response_subgraphs",
+            "eligible_for_indexing_rewards",
+        ]
 
 
 @patch("tenacity.nap.sleep", return_value=None)
@@ -330,27 +461,27 @@ class TestReadGbqDataframe:
         mock_sleep.assert_not_called()
 
 
-class TestFetchIndexerIssuanceEligibilityData:
-    """Tests for the main fetch_indexer_issuance_eligibility_data method."""
+class TestFetchIndexerDailyMetrics:
+    """Tests for the main fetch_indexer_daily_metrics method."""
 
 
-    def test_fetch_indexer_issuance_eligibility_data_succeeds_on_happy_path(self, provider: BigQueryProvider):
+    def test_fetch_indexer_daily_metrics_succeeds_on_happy_path(self, provider: BigQueryProvider):
         """
-        Tests the happy path for `fetch_indexer_issuance_eligibility_data`, ensuring it
+        Tests the happy path for `fetch_indexer_daily_metrics`, ensuring it
         orchestrates calls correctly and returns the final DataFrame.
         """
         # Arrange
-        provider._get_indexer_eligibility_query = MagicMock(return_value=MOCK_QUERY)
+        provider._get_indexer_daily_metrics_query = MagicMock(return_value=MOCK_QUERY)
         provider._read_gbq_dataframe = MagicMock(return_value=MOCK_DATAFRAME)
 
         # Act
-        result_df = provider.fetch_indexer_issuance_eligibility_data(
+        result_df = provider.fetch_indexer_daily_metrics(
             start_date=START_DATE,
             end_date=END_DATE,
         )
 
         # Assert
-        provider._get_indexer_eligibility_query.assert_called_once_with(
+        provider._get_indexer_daily_metrics_query.assert_called_once_with(
             start_date=START_DATE,
             end_date=END_DATE,
         )
@@ -358,24 +489,22 @@ class TestFetchIndexerIssuanceEligibilityData:
         pd.testing.assert_frame_equal(result_df, MOCK_DATAFRAME)
 
 
-    def test_fetch_indexer_issuance_eligibility_data_returns_empty_dataframe_on_empty_result(
-        self, provider: BigQueryProvider
-    ):
+    def test_fetch_indexer_daily_metrics_returns_empty_dataframe_on_empty_result(self, provider: BigQueryProvider):
         """
         Tests that the method gracefully handles and returns an empty DataFrame from BigQuery.
         """
         # Arrange
-        provider._get_indexer_eligibility_query = MagicMock(return_value=MOCK_QUERY)
+        provider._get_indexer_daily_metrics_query = MagicMock(return_value=MOCK_QUERY)
         provider._read_gbq_dataframe = MagicMock(return_value=MOCK_EMPTY_DATAFRAME)
 
         # Act
-        result_df = provider.fetch_indexer_issuance_eligibility_data(
+        result_df = provider.fetch_indexer_daily_metrics(
             start_date=START_DATE,
             end_date=END_DATE,
         )
 
         # Assert
-        provider._get_indexer_eligibility_query.assert_called_once_with(
+        provider._get_indexer_daily_metrics_query.assert_called_once_with(
             start_date=START_DATE,
             end_date=END_DATE,
         )
@@ -384,23 +513,21 @@ class TestFetchIndexerIssuanceEligibilityData:
         pd.testing.assert_frame_equal(result_df, MOCK_EMPTY_DATAFRAME)
 
 
-    def test_fetch_indexer_issuance_eligibility_data_propagates_exception_on_read_error(
-        self, provider: BigQueryProvider
-    ):
+    def test_fetch_indexer_daily_metrics_propagates_exception_on_read_error(self, provider: BigQueryProvider):
         """
         Tests that an exception from `_read_gbq_dataframe` is correctly propagated.
         """
         # Arrange
         error_to_raise = ValueError("Test DB Error")
-        provider._get_indexer_eligibility_query = MagicMock(return_value=MOCK_QUERY)
+        provider._get_indexer_daily_metrics_query = MagicMock(return_value=MOCK_QUERY)
         provider._read_gbq_dataframe = MagicMock(side_effect=error_to_raise)
 
         # Act & Assert
         with pytest.raises(ValueError, match="Test DB Error"):
-            provider.fetch_indexer_issuance_eligibility_data(
+            provider.fetch_indexer_daily_metrics(
                 start_date=START_DATE,
                 end_date=END_DATE,
             )
 
-        provider._get_indexer_eligibility_query.assert_called_once_with(start_date=START_DATE, end_date=END_DATE)
+        provider._get_indexer_daily_metrics_query.assert_called_once_with(start_date=START_DATE, end_date=END_DATE)
         provider._read_gbq_dataframe.assert_called_once_with(MOCK_QUERY)

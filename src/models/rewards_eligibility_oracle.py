@@ -126,8 +126,11 @@ def main(run_date_override: date = None):
                 max_blocks_behind=config["MAX_BLOCKS_BEHIND"],
                 credentials=credentials,
             )
-            eligibility_data = bigquery_provider.fetch_indexer_issuance_eligibility_data(start_date, end_date)
-            logger.info(f"Successfully fetched data for {len(eligibility_data)} indexers from BigQuery.")
+            daily_metrics = bigquery_provider.fetch_indexer_daily_metrics(start_date, end_date)
+            logger.info(f"Successfully fetched {len(daily_metrics)} daily metric rows from BigQuery.")
+
+            eligibility_data = bigquery_provider.aggregate_daily_metrics(daily_metrics)
+            logger.info(f"Aggregated daily metrics for {len(eligibility_data)} indexers.")
 
             # --- Data Processing Stage ---
             stage = "Data Processing and Artifact Generation"
@@ -136,6 +139,28 @@ def main(run_date_override: date = None):
                 current_date=current_run_date,
             )
             logger.info(f"Found {len(eligible_indexers)} eligible indexers after processing.")
+
+            # Retain the per-day detail behind the decision, alongside the criteria that produced it
+            pipeline.write_daily_metrics(
+                daily_metrics=daily_metrics,
+                current_date=current_run_date,
+                window_start=start_date,
+                window_end=end_date,
+            )
+            pipeline.write_run_metadata(
+                current_date=current_run_date,
+                window_start=start_date,
+                window_end=end_date,
+                criteria={
+                    "MIN_ONLINE_DAYS": config["MIN_ONLINE_DAYS"],
+                    "MIN_SUBGRAPHS": config["MIN_SUBGRAPHS"],
+                    "MAX_LATENCY_MS": config["MAX_LATENCY_MS"],
+                    "MAX_BLOCKS_BEHIND": config["MAX_BLOCKS_BEHIND"],
+                },
+                source="bigquery",
+                indexers_evaluated=len(eligibility_data),
+                indexers_eligible=len(eligible_indexers),
+            )
 
         # Clean up old data directories (run this regardless of cache hit/miss)
         pipeline.clean_old_date_directories(config["MAX_AGE_BEFORE_DELETION"])

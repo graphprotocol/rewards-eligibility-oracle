@@ -67,7 +67,7 @@ def oracle_context():
 
         # Configure instance return values for mocked classes
         mock_bq_provider = mock_bq_provider_cls.return_value
-        mock_bq_provider.fetch_indexer_issuance_eligibility_data.return_value = pd.DataFrame()
+        mock_bq_provider.fetch_indexer_daily_metrics.return_value = pd.DataFrame()
 
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.process.return_value = (["0xEligible"], ["0xIneligible"])
@@ -125,7 +125,7 @@ def test_main_succeeds_on_happy_path(oracle_context):
     )
 
     ctx["bq_provider_cls"].assert_called_once()
-    ctx["bq_provider"].fetch_indexer_issuance_eligibility_data.assert_called_once()
+    ctx["bq_provider"].fetch_indexer_daily_metrics.assert_called_once()
 
     ctx["pipeline_cls"].assert_called_once()
     ctx["pipeline"].process.assert_called_once()
@@ -167,7 +167,7 @@ def test_main_handles_failures_at_each_stage(oracle_context, failing_component, 
         "get_creds": ctx["get_creds"],
         "load_config": ctx["load_config"],
         "slack_create": ctx["slack"]["create"],
-        "bq_provider": ctx["bq_provider"].fetch_indexer_issuance_eligibility_data,
+        "bq_provider": ctx["bq_provider"].fetch_indexer_daily_metrics,
         "pipeline_process": ctx["pipeline"].process,
         "pipeline_clean": ctx["pipeline"].clean_old_date_directories,
         "client": ctx["client"].batch_renew_indexer_rewards_eligibility,
@@ -201,8 +201,8 @@ def test_main_uses_date_override_correctly(oracle_context):
 
     ctx["main"](run_date_override=override)
 
-    ctx["bq_provider"].fetch_indexer_issuance_eligibility_data.assert_called_once()
-    args, _ = ctx["bq_provider"].fetch_indexer_issuance_eligibility_data.call_args
+    ctx["bq_provider"].fetch_indexer_daily_metrics.assert_called_once()
+    args, _ = ctx["bq_provider"].fetch_indexer_daily_metrics.call_args
     assert args == (start_expected, override)
 
 

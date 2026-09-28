@@ -2,6 +2,7 @@
 Unit tests for the EligibilityPipeline.
 """
 
+import json
 import logging
 import shutil
 from datetime import date, timedelta
@@ -416,3 +417,189 @@ def test_get_directory_size_info_calculates_megabytes_correctly(pipeline: Eligib
     assert info["file_count"] == 1
     assert info["directory_count"] == 0
     assert info["path"] == str(output_dir)
+
+
+# --- Tests for the per-day metrics artifacts ---
+
+
+WINDOW_START = date(2025, 1, 1)
+WINDOW_END = date(2025, 1, 3)
+
+
+@pytest.fixture
+def daily_metrics_data() -> pd.DataFrame:
+    """Provides sparse per-day metrics, as BigQuery returns them, with days missing for both indexers."""
+    return pd.DataFrame(
+        {
+            "day": ["2025-01-01", "2025-01-03", "2025-01-02"],
+            "indexer": ["0x1", "0x1", "0x2"],
+            "query_attempts": [10, 4, 7],
+            "qualifying_queries": [8, 0, 7],
+            "qualifying_subgraphs": [2, 0, 1],
+            "failed_status": [1, 1, 0],
+            "failed_latency": [1, 0, 0],
+            "failed_blocks_behind": [0, 4, 0],
+            "is_online_day": [1, 0, 1],
+            "unique_good_response_subgraphs": [2, 2, 1],
+        }
+    )
+
+
+def test_build_daily_metrics_grid_emits_zero_rows_for_days_without_attempts(
+    pipeline: EligibilityPipeline, daily_metrics_data: pd.DataFrame
+):
+    """
+    Tests that days on which an indexer received no query attempts become explicit zero rows, so that
+    'no queries routed' is visible rather than a gap a consumer has to infer.
+    """
+    # Act
+    grid = pipeline.build_daily_metrics_grid(daily_metrics_data, WINDOW_START, WINDOW_END)
+
+    # Assert: every indexer has a row for every day of the window
+    assert len(grid) == 6
+    assert sorted(grid["day"].unique()) == ["2025-01-01", "2025-01-02", "2025-01-03"]
+
+    # Assert: the day 0x1 was routed nothing is present and zeroed throughout
+    missing_day = grid[(grid["indexer"] == "0x1") & (grid["day"] == "2025-01-02")].iloc[0]
+    assert missing_day["query_attempts"] == 0
+    assert missing_day["qualifying_queries"] == 0
+    assert missing_day["is_online_day"] == 0
+
+    # Assert: days with data are carried through untouched
+    served_day = grid[(grid["indexer"] == "0x1") & (grid["day"] == "2025-01-01")].iloc[0]
+    assert served_day["query_attempts"] == 10
+    assert served_day["qualifying_subgraphs"] == 2
+    assert served_day["is_online_day"] == 1
+
+
+def test_build_daily_metrics_grid_drops_the_window_level_subgraph_count(
+    pipeline: EligibilityPipeline, daily_metrics_data: pd.DataFrame
+):
+    """
+    Tests that the window-level subgraph count, which is only carried to support aggregation, is not
+    written into a per-day artifact where it would be misread as a daily figure.
+    """
+    # Act
+    grid = pipeline.build_daily_metrics_grid(daily_metrics_data, WINDOW_START, WINDOW_END)
+
+    # Assert
+    assert "unique_good_response_subgraphs" not in grid.columns
+    assert list(grid.columns) == [
+        "day",
+        "indexer",
+        "query_attempts",
+        "qualifying_queries",
+        "qualifying_subgraphs",
+        "failed_status",
+        "failed_latency",
+        "failed_blocks_behind",
+        "is_online_day",
+    ]
+
+
+def test_build_daily_metrics_grid_handles_empty_input(pipeline: EligibilityPipeline):
+    """
+    Tests that a window with no data at all still produces the expected structure.
+    """
+    # Act
+    grid = pipeline.build_daily_metrics_grid(pd.DataFrame(), WINDOW_START, WINDOW_END)
+
+    # Assert
+    assert grid.empty
+    assert "is_online_day" in grid.columns
+
+
+def test_build_daily_metrics_grid_fails_on_invalid_dataframe_structure(pipeline: EligibilityPipeline):
+    """
+    Tests that metrics missing the expected columns are rejected rather than silently written out.
+    """
+    # Arrange
+    invalid_df = pd.DataFrame({"day": ["2025-01-01"], "indexer": ["0x1"]})
+
+    # Act & Assert
+    with pytest.raises(ValueError, match="DataFrame missing required columns"):
+        pipeline.build_daily_metrics_grid(invalid_df, WINDOW_START, WINDOW_END)
+
+
+def test_write_daily_metrics_saves_the_grid_for_the_run_date(
+    pipeline: EligibilityPipeline, daily_metrics_data: pd.DataFrame
+):
+    """
+    Tests that the per-day grid is written to the run's output directory and can be read back.
+    """
+    # Arrange
+    current_date_val = date(2025, 1, 3)
+
+    # Act
+    path = pipeline.write_daily_metrics(daily_metrics_data, current_date_val, WINDOW_START, WINDOW_END)
+
+    # Assert
+    assert path == pipeline.get_date_output_directory(current_date_val) / "indexer_daily_metrics.csv"
+    assert path.exists()
+
+    written = pd.read_csv(path)
+    assert len(written) == 6
+    assert written["is_online_day"].sum() == 2
+
+
+def test_write_run_metadata_records_the_criteria_that_produced_the_run(pipeline: EligibilityPipeline):
+    """
+    Tests that the manifest captures the window and thresholds, which is what makes is_online_day
+    interpretable once the eligibility criteria change.
+    """
+    # Arrange
+    current_date_val = date(2025, 1, 3)
+    criteria = {"MIN_ONLINE_DAYS": 5, "MIN_SUBGRAPHS": 1, "MAX_LATENCY_MS": 5000, "MAX_BLOCKS_BEHIND": 50000}
+
+    # Act
+    path = pipeline.write_run_metadata(
+        current_date=current_date_val,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        criteria=criteria,
+        source="bigquery",
+        indexers_evaluated=2,
+        indexers_eligible=1,
+    )
+
+    # Assert
+    assert path == pipeline.get_date_output_directory(current_date_val) / "run_metadata.json"
+
+    metadata = json.loads(path.read_text())
+    assert metadata["run_date"] == "2025-01-03"
+    assert metadata["window_start"] == "2025-01-01"
+    assert metadata["window_end"] == "2025-01-03"
+    assert metadata["criteria"] == criteria
+    assert metadata["source"] == "bigquery"
+    assert metadata["indexers_evaluated"] == 2
+    assert metadata["indexers_eligible"] == 1
+
+
+def test_has_existing_processed_data_requires_the_per_day_artifacts(
+    pipeline: EligibilityPipeline, sample_data: pd.DataFrame, daily_metrics_data: pd.DataFrame
+):
+    """
+    Tests that a cache hit cannot be served from a run that produced the summary files but not the
+    per-day grid or the manifest.
+    """
+    # Arrange: a run that only wrote the summary artifacts
+    current_date_val = date(2025, 1, 3)
+    pipeline.process(sample_data, current_date=current_date_val)
+
+    # Assert: the summary files alone are not enough
+    assert pipeline.has_existing_processed_data(current_date_val) is False
+
+    # Act: complete the run's artifacts
+    pipeline.write_daily_metrics(daily_metrics_data, current_date_val, WINDOW_START, WINDOW_END)
+    pipeline.write_run_metadata(
+        current_date=current_date_val,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        criteria={"MIN_ONLINE_DAYS": 5},
+        source="bigquery",
+        indexers_evaluated=4,
+        indexers_eligible=2,
+    )
+
+    # Assert
+    assert pipeline.has_existing_processed_data(current_date_val) is True

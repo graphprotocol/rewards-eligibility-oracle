@@ -7,16 +7,33 @@ This module contains the logic for processing raw BigQuery data into a list of e
 - Cleanup of old data.
 """
 
+import json
 import logging
 import shutil
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Per-day artifact columns, in output order
+DAILY_METRICS_COLUMNS = [
+    "day",
+    "indexer",
+    "query_attempts",
+    "qualifying_queries",
+    "qualifying_subgraphs",
+    "failed_status",
+    "failed_latency",
+    "failed_blocks_behind",
+    "is_online_day",
+]
+
+# Counters that are zero on a day an indexer received no query attempts
+DAILY_METRICS_COUNT_COLUMNS = [column for column in DAILY_METRICS_COLUMNS if column not in ("day", "indexer")]
 
 
 class EligibilityPipeline:
@@ -104,6 +121,132 @@ class EligibilityPipeline:
         logger.info(f"Saved {len(ineligible_df)} ineligible indexers to: {ineligible_path}")
 
 
+    def build_daily_metrics_grid(
+        self, daily_metrics: pd.DataFrame, window_start: date, window_end: date
+    ) -> pd.DataFrame:
+        """
+        Expand sparse per-day rows into a complete indexer x day grid covering the window.
+
+        BigQuery only records query attempts, so a day on which an indexer was routed nothing produces
+        no row at all. Those days are emitted as explicit zero rows to keep 'no queries routed' visible
+        rather than something a consumer has to infer from a gap.
+
+        Args:
+            daily_metrics: Per-day metrics from BigQuery, one row per indexer per day with data
+            window_start: First day of the analysis window
+            window_end: Last day of the analysis window
+
+        Returns:
+            pd.DataFrame: Dense grid with the columns in DAILY_METRICS_COLUMNS
+        """
+        # Preserve the output structure when the window contains no data at all
+        if daily_metrics is None or daily_metrics.empty:
+            return pd.DataFrame(columns=DAILY_METRICS_COLUMNS)
+
+        self.validate_dataframe_structure(daily_metrics, DAILY_METRICS_COLUMNS)
+
+        # Normalise days to strings so BigQuery dates and SQLite text both index consistently
+        grid = daily_metrics.copy()
+        grid["day"] = pd.to_datetime(grid["day"]).dt.strftime("%Y-%m-%d")
+
+        # Build every indexer/day combination the window should contain
+        days = pd.date_range(start=window_start, end=window_end, freq="D").strftime("%Y-%m-%d")
+        indexers = sorted(grid["indexer"].unique())
+        full_index = pd.MultiIndex.from_product([indexers, days], names=["indexer", "day"])
+
+        # Reindex onto the full grid, filling the days that produced no rows with zeroes
+        grid = (
+            grid.set_index(["indexer", "day"])[DAILY_METRICS_COUNT_COLUMNS]
+            .reindex(full_index, fill_value=0)
+            .reset_index()
+        )
+
+        # Keep counters whole so the artifact does not render them as floats
+        for column in DAILY_METRICS_COUNT_COLUMNS:
+            grid[column] = pd.to_numeric(grid[column], errors="coerce").fillna(0).astype("int64")
+
+        # Return the grid ordered so each indexer's window reads as a run of consecutive days
+        return grid[DAILY_METRICS_COLUMNS].sort_values(by=["indexer", "day"], ignore_index=True)
+
+
+    def write_daily_metrics(
+        self, daily_metrics: pd.DataFrame, current_date: date, window_start: date, window_end: date
+    ) -> Path:
+        """
+        Save the per-day metrics grid for the analysis window to a date-specific directory.
+
+        The grid spans the whole window rather than the run date alone, so the artifact reproduces the
+        eligibility decision it sits beside without having to be stitched to neighbouring runs.
+
+        Args:
+            daily_metrics: Per-day metrics from BigQuery
+            current_date: The date of the current run, used for creating the output directory
+            window_start: First day of the analysis window
+            window_end: Last day of the analysis window
+
+        Returns:
+            Path: Path to the saved CSV
+        """
+        grid = self.build_daily_metrics_grid(daily_metrics, window_start, window_end)
+
+        output_date_dir = self.get_date_output_directory(current_date)
+        output_date_dir.mkdir(exist_ok=True, parents=True)
+
+        daily_metrics_path = output_date_dir / "indexer_daily_metrics.csv"
+        grid.to_csv(daily_metrics_path, index=False)
+        logger.info(f"Saved {len(grid)} daily metric rows to: {daily_metrics_path}")
+
+        return daily_metrics_path
+
+
+    def write_run_metadata(
+        self,
+        current_date: date,
+        window_start: date,
+        window_end: date,
+        criteria: Dict[str, Optional[int]],
+        source: str,
+        indexers_evaluated: int,
+        indexers_eligible: int,
+    ) -> Path:
+        """
+        Save the manifest describing how a run was produced.
+
+        Recording the thresholds keeps each run's artifacts interpretable after the eligibility criteria
+        change, since is_online_day only means anything against the criteria that produced it.
+
+        Args:
+            current_date: The date of the current run
+            window_start: First day of the analysis window
+            window_end: Last day of the analysis window
+            criteria: Eligibility thresholds applied by this run
+            source: Where the run's data came from, 'bigquery' or 'cache'
+            indexers_evaluated: Number of indexers the run considered
+            indexers_eligible: Number of indexers the run found eligible
+
+        Returns:
+            Path: Path to the saved JSON
+        """
+        metadata = {
+            "run_date": current_date.strftime("%Y-%m-%d"),
+            "window_start": window_start.strftime("%Y-%m-%d"),
+            "window_end": window_end.strftime("%Y-%m-%d"),
+            "criteria": criteria,
+            "source": source,
+            "indexers_evaluated": indexers_evaluated,
+            "indexers_eligible": indexers_eligible,
+        }
+
+        output_date_dir = self.get_date_output_directory(current_date)
+        output_date_dir.mkdir(exist_ok=True, parents=True)
+
+        metadata_path = output_date_dir / "run_metadata.json"
+        metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+        logger.info(f"Saved run metadata to: {metadata_path}")
+
+        return metadata_path
+
+
     def clean_old_date_directories(self, max_age_before_deletion: int) -> None:
         """
         Remove old date directories to prevent unlimited growth.
@@ -177,7 +320,7 @@ class EligibilityPipeline:
             current_date: The date to check for existing data
 
         Returns:
-            bool: True if all required CSV files exist and are not empty
+            bool: True if all required output files exist and are not empty
         """
         output_date_dir = self.get_date_output_directory(current_date)
 
@@ -185,11 +328,14 @@ class EligibilityPipeline:
         if not output_date_dir.exists():
             return False
 
-        # Define required files
+        # Define required files. The per-day artifacts are included so a cache hit cannot serve a run
+        # whose grid or manifest is missing.
         required_files = [
             "eligible_indexers.csv",
             "indexer_issuance_eligibility_data.csv",
             "ineligible_indexers.csv",
+            "indexer_daily_metrics.csv",
+            "run_metadata.json",
         ]
 
         # Check that all required files exist and are not empty

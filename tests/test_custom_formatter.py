@@ -32,6 +32,12 @@ _spec.loader.exec_module(custom_formatter)
         ),
         ("def f():\n    pass\n", "def f():\n    pass\n"),
         ("x = 1   \n\n\n", "x = 1\n"),
+        (
+            "def outer():\n    x = 1\n    def inner():\n        pass\n"
+            "    def __init__():\n        pass\n    return inner\n",
+            "def outer():\n    x = 1\n\n\n    def inner():\n        pass\n\n\n"
+            "    def __init__():\n        pass\n    return inner\n",
+        ),
     ],
     ids=[
         "top_level_function_gets_2",
@@ -41,6 +47,7 @@ _spec.loader.exec_module(custom_formatter)
         "fmt_off_block_is_untouched",
         "definition_on_first_line_gets_none",
         "trailing_whitespace_is_trimmed",
+        "nested_functions_get_2_even_if_named_init",
     ],
 )
 def test_format_sets_blank_lines_above_definitions(source, expected):

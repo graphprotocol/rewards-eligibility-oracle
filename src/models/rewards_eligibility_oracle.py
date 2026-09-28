@@ -221,7 +221,7 @@ def _fetch_and_process_eligibility_data(
 
 def _send_success_notification(
     slack_notifier, eligible_indexers, transaction_links, rpc_provider_used, execution_time
-):
+) -> None:
     """Report a successful run to Slack; a Slack failure is logged and does not fail the run."""
     try:
         batch_count = len(transaction_links) if transaction_links else 0

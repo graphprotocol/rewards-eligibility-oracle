@@ -306,3 +306,14 @@ def test_decode_payload_rejects_an_unknown_message_tag():
 
     with pytest.raises(PayloadError, match="Unknown message tag"):
         decode_payload(unknown_tag)
+
+
+def test_decode_payload_reads_message_tags_as_varints():
+    """
+    Tests that a tag is read as a varint, as the wire format states, so a tag of 128 or more is not
+    split into a 1-byte tag followed by a stray byte.
+    """
+    multi_byte_tag = PAYLOAD_MAGIC + _encode_varint(ENCODING_VERSION) + _encode_varint(300)
+
+    with pytest.raises(PayloadError, match="Unknown message tag: 0x12c"):
+        decode_payload(multi_byte_tag)

@@ -174,7 +174,7 @@ def encode_payload(
     payload += _encode_varint(ENCODING_VERSION)
 
     # Provenance, so a consumer can tell which run and window a payload describes
-    payload.append(TAG_RUN_INFO)
+    payload += _encode_varint(TAG_RUN_INFO)
     payload += _encode_day(run_date)
     payload += _encode_day(window_start)
     payload += _encode_day(window_end)
@@ -182,7 +182,7 @@ def encode_payload(
     payload += _encode_varint(indexers_eligible)
 
     # Thresholds, without which is_online_day cannot be interpreted
-    payload.append(TAG_CRITERIA)
+    payload += _encode_varint(TAG_CRITERIA)
     for field in CRITERIA_FIELDS:
         value = criteria.get(field)
         if value is None:
@@ -202,7 +202,7 @@ def encode_payload(
         # Skip indexers routed nothing that day; their absence is what encodes the zero row
         rows = [row for row in rows_by_day.get(day.isoformat(), []) if int(row["query_attempts"]) > 0]
 
-        payload.append(TAG_DAILY_METRICS)
+        payload += _encode_varint(TAG_DAILY_METRICS)
         payload += _encode_day(day)
         payload += _encode_varint(len(rows))
 
@@ -238,8 +238,7 @@ def decode_payload(payload: bytes) -> Dict[str, Any]:
     decoded: Dict[str, Any] = {"version": version, "run_info": None, "criteria": None, "daily_metrics": []}
 
     while offset < len(payload):
-        tag = payload[offset]
-        offset += 1
+        tag, offset = _decode_varint(payload, offset)
 
         if tag == TAG_RUN_INFO:
             run_day, offset = _decode_day(payload, offset)

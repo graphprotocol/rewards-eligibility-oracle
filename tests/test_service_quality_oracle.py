@@ -44,10 +44,11 @@ MOCK_CONFIG = {
 # stays off unless a test opts into it.
 MOCK_DATA_EDGE_ADDRESS = "0x62c2305739cc75f19a3a6d52387ceb3690d99a99"
 
-# Stands in for the grid the pipeline returns, which the oracle publishes without rebuilding it
+# Stands in for the grid the pipeline returns, which the oracle publishes without rebuilding it. Dated
+# today, the final day of the default run's window, since days with no activity are not published.
 MOCK_DAILY_METRICS_GRID = pd.DataFrame(
     {
-        "day": ["2026-09-25"],
+        "day": [date.today().isoformat()],
         "indexer": ["0x32bbd16a94ebb289edceebe77f35acc82664157b"],
         "query_attempts": [10],
         "qualifying_queries": [8],
@@ -474,4 +475,31 @@ def test_main_survives_a_data_edge_publishing_failure(oracle_context):
     # Renewals still happen and the run still reports success
     ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
     ctx["circuit_breaker"].record_failure.assert_not_called()
+    ctx["slack"]["notifier"].send_success_notification.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "grid",
+    [
+        pd.DataFrame(columns=MOCK_DAILY_METRICS_GRID.columns),
+        MOCK_DAILY_METRICS_GRID.assign(day="2026-09-01"),
+    ],
+    ids=["no_rows_at_all", "activity_only_before_the_published_days"],
+)
+def test_main_skips_publishing_when_the_published_days_have_no_activity(oracle_context, grid):
+    """
+    Test that trailing days with no query attempts at all are treated as missing source data and not
+    published, since they would otherwise go on chain as a day on which every indexer was routed nothing.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["pipeline"].write_daily_metrics.return_value = grid
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    ctx["data_edge"].post_payload.assert_not_called()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: DataEdge publishing skipped"
+
+    # The rest of the run is unaffected
     ctx["slack"]["notifier"].send_success_notification.assert_called_once()

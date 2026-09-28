@@ -287,6 +287,9 @@ Three properties worth keeping if the format is revised:
   BigQuery data can all restate a day.
 - **The cache path does not publish.** A re-run within the 30-minute cache window republishes
   nothing, since the run it is replaying already published.
+- **Missing data is not published as zeros.** If none of the published days has a single query
+  attempt, the source data has not arrived, so the run skips publishing and alerts (OpsGenie P4).
+  Publishing would record every indexer as routed nothing, and the older day is never restated.
 
 ---
 

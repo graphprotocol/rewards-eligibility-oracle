@@ -26,7 +26,7 @@ from src.utils.configuration import (
     credential_manager,
     load_config,
 )
-from src.utils.data_edge_codec import encode_payload
+from src.utils.data_edge_codec import encode_payload, select_days_to_publish
 from src.utils.opsgenie import send_opsgenie_alert_safe
 from src.utils.slack_notifier import create_slack_notifier
 
@@ -73,6 +73,30 @@ def publish_daily_metrics_to_data_edge(
         return None
 
     try:
+        publish_days = (
+            config["DATA_EDGE_PUBLISH_DAYS"]
+            if config.get("DATA_EDGE_PUBLISH_DAYS") is not None
+            else DEFAULT_DATA_EDGE_PUBLISH_DAYS
+        )
+
+        # No query attempts on any published day means the source data is missing, not that every indexer
+        # was idle. Publishing would record zeros for those days that the next run's overlap never fully restates.
+        days_to_publish = [day.isoformat() for day in select_days_to_publish(window_end, publish_days)]
+        published_rows = daily_metrics_grid[daily_metrics_grid["day"].isin(days_to_publish)]
+        if not (published_rows["query_attempts"] > 0).any():
+            logger.warning(f"Skipping DataEdge publishing: no query attempts recorded for {days_to_publish}")
+            send_opsgenie_alert_safe(
+                api_key=config.get("OPSGENIE_API_KEY"),
+                message="Rewards Oracle: DataEdge publishing skipped",
+                description=(
+                    f"Eligibility renewal was unaffected. No query attempts were recorded for {days_to_publish}, "
+                    "which suggests the source data has not arrived, so nothing was published."
+                ),
+                priority="P4",
+            )
+
+            return None
+
         payload = encode_payload(
             run_date=run_date,
             window_start=window_start,
@@ -86,11 +110,7 @@ def publish_daily_metrics_to_data_edge(
             daily_rows=daily_metrics_grid.to_dict("records"),
             indexers_evaluated=indexers_evaluated,
             indexers_eligible=indexers_eligible,
-            publish_days=(
-                config["DATA_EDGE_PUBLISH_DAYS"]
-                if config.get("DATA_EDGE_PUBLISH_DAYS") is not None
-                else DEFAULT_DATA_EDGE_PUBLISH_DAYS
-            ),
+            publish_days=publish_days,
         )
 
         data_edge_client = DataEdgeClient(

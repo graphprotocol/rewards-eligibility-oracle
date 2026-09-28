@@ -153,15 +153,16 @@ class DataEdgeClient:
 
         signed_tx = w3.eth.account.sign_transaction(transaction, private_key)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        logger.info(f"DataEdge payload sent with hash: 0x{tx_hash.hex()}")
+        tx_hash_hex = tx_hash.hex().removeprefix("0x")
+        logger.info(f"DataEdge payload sent with hash: 0x{tx_hash_hex}")
 
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash, self.tx_timeout_seconds)
         if receipt["status"] != 1:
             raise DataEdgeRevertedError(
-                f"DataEdge transaction reverted: {self.block_explorer_url}/tx/0x{tx_hash.hex()}"
+                f"DataEdge transaction reverted: {self.block_explorer_url}/tx/0x{tx_hash_hex}"
             )
 
-        return tx_hash.hex()
+        return tx_hash_hex
 
 
     def post_payload(self, payload: bytes, private_key: str) -> Optional[str]:

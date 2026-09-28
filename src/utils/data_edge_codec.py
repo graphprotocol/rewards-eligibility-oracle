@@ -195,7 +195,12 @@ def encode_payload(
     for row in daily_rows:
         rows_by_day.setdefault(str(row["day"]), []).append(row)
 
-    for day in select_days_to_publish(window_end, min(publish_days, (window_end - window_start).days + 1)):
+    # Never publish further back than the window itself, however many days are asked for
+    days_in_window = (window_end - window_start).days + 1
+
+    for day in select_days_to_publish(window_end, min(publish_days, days_in_window)):
+        # Skip indexers routed nothing that day; their absence is what encodes the zero row
+        rows = [row for row in rows_by_day.get(day.isoformat(), []) if int(row["query_attempts"]) > 0]
 
         payload.append(TAG_DAILY_METRICS)
         payload += _encode_day(day)

@@ -28,6 +28,7 @@ MOCK_CONFIG = {
     "BLOCKCHAIN_RPC_URLS": ["http://fake-rpc.com"],
     "BLOCKCHAIN_CONTRACT_ADDRESS": "0x1234",
     "BLOCK_EXPLORER_URL": "http://etherscan.io",
+    "DATA_EDGE_PUBLISH_DAYS": 2,
     "TX_TIMEOUT_SECONDS": 180,
     "PRIVATE_KEY": "0xfakekey",
     "BLOCKCHAIN_CHAIN_ID": 1,

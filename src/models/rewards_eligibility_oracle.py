@@ -34,10 +34,6 @@ from src.utils.slack_notifier import create_slack_notifier
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Trailing days of the window republished when the config does not say, so that the next run restates
-# the day that was still in progress when this one read it
-DEFAULT_DATA_EDGE_PUBLISH_DAYS = 2
-
 
 def publish_daily_metrics_to_data_edge(
     config: dict,
@@ -73,11 +69,7 @@ def publish_daily_metrics_to_data_edge(
         return None
 
     try:
-        publish_days = (
-            config["DATA_EDGE_PUBLISH_DAYS"]
-            if config.get("DATA_EDGE_PUBLISH_DAYS") is not None
-            else DEFAULT_DATA_EDGE_PUBLISH_DAYS
-        )
+        publish_days = config["DATA_EDGE_PUBLISH_DAYS"]
 
         # No query attempts on any published day means the source data is missing, not that every indexer
         # was idle. Publishing would record zeros for those days that the next run's overlap never fully restates.

@@ -187,6 +187,9 @@ class TestConfigLoader:
         assert config["MAX_LATENCY_MS"] is None
         assert config["BATCH_SIZE"] is None
 
+        # Publishing days has a default of its own, so publishing works with only an address set
+        assert config["DATA_EDGE_PUBLISH_DAYS"] == 2
+
 
     def test_load_config_fails_if_file_missing(self):
         """
@@ -471,6 +474,49 @@ class TestConfigValidation:
         # Act & Assert
         with pytest.raises(ConfigurationError, match="Invalid SCHEDULED_RUN_TIME"):
             _validate_config(config)
+
+
+    @pytest.mark.parametrize(
+        "overrides, message",
+        [
+            ({"DATA_EDGE_CONTRACT_ADDRESS": "0x1234"}, "Invalid DATA_EDGE_CONTRACT_ADDRESS"),
+            ({"DATA_EDGE_PUBLISH_DAYS": 0}, "Invalid DATA_EDGE_PUBLISH_DAYS"),
+            ({"DATA_EDGE_PUBLISH_DAYS": None}, "Invalid DATA_EDGE_PUBLISH_DAYS"),
+        ],
+        ids=["short_address", "zero_days", "missing_days"],
+    )
+    def test_validate_config_fails_on_invalid_data_edge_settings(
+        self, full_valid_config: dict, overrides: dict, message: str
+    ):
+        """
+        GIVEN DataEdge publishing switched on with an invalid setting
+        WHEN _validate_config is called
+        THEN it should raise at startup, rather than failing every run after the renewals.
+        """
+        # Arrange
+        config = {
+            **full_valid_config,
+            "DATA_EDGE_CONTRACT_ADDRESS": "0x62c2305739cc75f19a3a6d52387ceb3690d99a99",
+            "DATA_EDGE_PUBLISH_DAYS": 2,
+            **overrides,
+        }
+
+        # Act & Assert
+        with pytest.raises(ConfigurationError, match=message):
+            _validate_config(config)
+
+
+    def test_validate_config_ignores_data_edge_settings_when_publishing_is_off(self, full_valid_config: dict):
+        """
+        GIVEN no DataEdge address, so publishing is off
+        WHEN _validate_config is called with a publishing setting that would otherwise be invalid
+        THEN it should not raise, since the setting is never used.
+        """
+        # Arrange
+        config = {**full_valid_config, "DATA_EDGE_CONTRACT_ADDRESS": "", "DATA_EDGE_PUBLISH_DAYS": 0}
+
+        # Act & Assert
+        _validate_config(config)  # Should not raise
 
 
     def test_validate_all_required_env_vars_succeeds_when_all_set(self, mock_env):

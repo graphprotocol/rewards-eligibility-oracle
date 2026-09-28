@@ -5,6 +5,7 @@ Unit tests for the DataEdgeClient.
 from unittest.mock import MagicMock, patch
 
 import pytest
+from web3.exceptions import ContractLogicError
 
 from src.models.data_edge_client import (
     FALLBACK_GAS_OVERHEAD,
@@ -35,7 +36,7 @@ def _build_web3(
     w3.eth.account.from_key.return_value = MagicMock(address=SENDER_ADDRESS)
 
     if estimate_gas_fails:
-        w3.eth.estimate_gas.side_effect = Exception("execution reverted during estimation")
+        w3.eth.estimate_gas.side_effect = Exception("the method eth_estimateGas is not supported")
     else:
         w3.eth.estimate_gas.return_value = 500_000
 
@@ -272,6 +273,26 @@ class TestPostPayload:
         transaction = w3.eth.account.sign_transaction.call_args.args[0]
         assert transaction["gas"] > FALLBACK_GAS_OVERHEAD
         assert transaction["gas"] == FALLBACK_GAS_OVERHEAD + len(PAYLOAD) * 24
+
+
+    def test_post_payload_does_not_send_a_payload_that_reverts_during_estimation(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a revert reported by gas estimation stops the publish before anything is sent, rather
+        than falling back to priced gas and paying for the same revert on chain.
+        """
+        # Arrange
+        w3 = _build_web3()
+        w3.eth.estimate_gas.side_effect = ContractLogicError("execution reverted")
+        mock_web3.return_value = w3
+
+        # Act & Assert
+        with pytest.raises(DataEdgeRevertedError, match="reverted during gas estimation"):
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        w3.eth.send_raw_transaction.assert_not_called()
+        mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
 
 
     def test_post_payload_applies_a_buffer_to_the_estimated_gas(

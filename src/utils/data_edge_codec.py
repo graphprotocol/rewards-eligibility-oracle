@@ -19,9 +19,11 @@ Wire format (all integers are unsigned LEB128 varints of at most 64 bits, all da
         row  := address(20 bytes), query_attempts, qualifying_queries, qualifying_subgraphs,
                 failed_status, failed_latency, failed_blocks_behind, is_online_day
 
-Rows are emitted only for indexers that received query attempts that day. An indexer absent from a
-day's rows was routed nothing, which the subgraph materialises as a zero row. Criteria are published
-on every payload rather than on change, so a payload is interpretable without any prior state.
+Rows are emitted only for indexers that received query attempts that day, so an indexer absent from a
+day's rows was routed nothing on it. Nothing here enumerates the indexers a run evaluated: an indexer
+routed nothing across the whole window appears in no payload at all, and only a consumer holding its
+own roster can tell that apart from an indexer that does not exist. Criteria are published on every
+payload rather than on change, so a payload is interpretable without any prior state.
 """
 
 import logging
@@ -135,7 +137,7 @@ def _decode_day(payload: bytes, offset: int) -> Tuple[date, int]:
     return EPOCH + timedelta(days=days), offset
 
 
-def select_days_to_publish(window_end: date, publish_days: int) -> List[date]:
+def select_days_to_publish(window_start: date, window_end: date, publish_days: int) -> List[date]:
     """
     Return the most recent days of the window that a run publishes, oldest first.
 
@@ -143,7 +145,11 @@ def select_days_to_publish(window_end: date, publish_days: int) -> List[date]:
     following run. Publishing an overlap of more than one day also lets a run restate days whose
     source data arrived late, and lets it cover a day whose own run failed.
 
+    Never reaches back past window_start, however many days are asked for. The clamp lives here so
+    that every caller agrees on which days a run publishes.
+
     Args:
+        window_start: First day of the analysis window
         window_end: Last day of the analysis window
         publish_days: How many trailing days to publish
 
@@ -153,7 +159,11 @@ def select_days_to_publish(window_end: date, publish_days: int) -> List[date]:
     if publish_days < 1:
         raise PayloadError(f"publish_days must be at least 1, got {publish_days}")
 
-    return [window_end - timedelta(days=offset) for offset in reversed(range(publish_days))]
+    days_in_window = (window_end - window_start).days + 1
+    if days_in_window < 1:
+        raise PayloadError(f"window_end {window_end} is before window_start {window_start}")
+
+    return [window_end - timedelta(days=offset) for offset in reversed(range(min(publish_days, days_in_window)))]
 
 
 def encode_payload(
@@ -207,10 +217,7 @@ def encode_payload(
     for row in daily_rows:
         rows_by_day.setdefault(str(row["day"]), []).append(row)
 
-    # Never publish further back than the window itself, however many days are asked for
-    days_in_window = (window_end - window_start).days + 1
-
-    for day in select_days_to_publish(window_end, min(publish_days, days_in_window)):
+    for day in select_days_to_publish(window_start, window_end, publish_days):
         # Skip indexers routed nothing that day; their absence is what encodes the zero row
         rows = [row for row in rows_by_day.get(day.isoformat(), []) if int(row["query_attempts"]) > 0]
 

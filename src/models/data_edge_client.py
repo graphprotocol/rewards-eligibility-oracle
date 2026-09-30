@@ -12,8 +12,9 @@ the transactions that renew indexer eligibility, and the two have no shared fail
 import logging
 from typing import List, Optional
 
+from hexbytes import HexBytes
 from web3 import Web3
-from web3.exceptions import ContractLogicError
+from web3.exceptions import ContractLogicError, TransactionNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,36 @@ class DataEdgeClient:
         return base_fee, max_priority_fee
 
 
+    def _node_has_transaction(self, w3: Web3, tx_hash: HexBytes) -> bool:
+        """
+        Check whether a node already knows a transaction, to resolve an ambiguous broadcast.
+
+        Defaults to True when the question cannot be answered, since treating an accepted transaction
+        as never sent is the more expensive mistake: the retry would either duplicate the publish under
+        the next nonce or be rejected as an underpriced replacement.
+
+        Args:
+            w3: Connected Web3 instance
+            tx_hash: Hash of the signed transaction
+
+        Returns:
+            bool: True if the node has the transaction, or if it could not be established
+        """
+        # Look the transaction up, which answers the question directly when the node responds
+        try:
+            w3.eth.get_transaction(tx_hash)
+            return True
+
+        # The node answered and does not have it, so nothing reached the network through this provider
+        except TransactionNotFound:
+            return False
+
+        except Exception as e:
+            logger.warning(f"Could not establish whether 0x{tx_hash.hex().removeprefix('0x')} was sent: {e}")
+
+            return True
+
+
     def _publish_via_provider(self, rpc_url: str, payload: bytes, private_key: str) -> str:
         """
         Publish a payload through a single RPC provider and return the transaction hash.
@@ -178,10 +209,24 @@ class DataEdgeClient:
 
         signed_tx = w3.eth.account.sign_transaction(transaction, private_key)
 
-        # Everything up to here can be retried freely, because nothing has reached the network yet
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        tx_hash_hex = tx_hash.hex().removeprefix("0x")
+        # The hash is known before the broadcast, so a lost response can still be resolved by it
+        tx_hash_hex = signed_tx.hash.hex().removeprefix("0x")
         tx_url = f"{self.block_explorer_url}/tx/0x{tx_hash_hex}"
+
+        # Everything up to here can be retried freely, because nothing has reached the network yet
+        try:
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+
+        # The node may have accepted the transaction before the response was lost, so ask whether it
+        # did rather than assuming either way
+        except Exception as e:
+            if self._node_has_transaction(w3, signed_tx.hash):
+                raise DataEdgePendingError(
+                    f"DataEdge transaction was accepted but the broadcast failed ({e}): {tx_url}", tx_url
+                ) from e
+
+            raise
+
         logger.info(f"DataEdge payload sent with hash: 0x{tx_hash_hex}")
 
         # Past the broadcast the transaction may be mined whatever happens next, so a failed receipt

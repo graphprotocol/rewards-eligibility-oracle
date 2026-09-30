@@ -73,7 +73,9 @@ def publish_daily_metrics_to_data_edge(
 
         # No query attempts on any published day means the source data is missing, not that every indexer
         # was idle. Publishing would record zeros for those days that the next run's overlap never fully restates.
-        days_to_publish = [day.isoformat() for day in select_days_to_publish(window_end, publish_days)]
+        days_to_publish = [
+            day.isoformat() for day in select_days_to_publish(window_start, window_end, publish_days)
+        ]
         published_rows = daily_metrics_grid[daily_metrics_grid["day"].isin(days_to_publish)]
         if not (published_rows["query_attempts"] > 0).any():
             logger.warning(f"Skipping DataEdge publishing: no query attempts recorded for {days_to_publish}")

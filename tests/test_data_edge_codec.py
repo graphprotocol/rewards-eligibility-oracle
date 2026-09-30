@@ -95,7 +95,29 @@ def test_select_days_to_publish_returns_trailing_days_oldest_first():
     """
     Tests that the published range ends on the window's last day and runs backwards from it.
     """
-    assert select_days_to_publish(WINDOW_END, 3) == [date(2026, 9, 23), date(2026, 9, 24), WINDOW_END]
+    assert select_days_to_publish(WINDOW_START, WINDOW_END, 3) == [
+        date(2026, 9, 23),
+        date(2026, 9, 24),
+        WINDOW_END,
+    ]
+
+
+def test_select_days_to_publish_never_reaches_past_the_window_start():
+    """
+    Tests that asking for more days than the window holds publishes the window instead of days that
+    were never analysed. The clamp lives here so every caller agrees on which days a run publishes.
+    """
+    short_window_start = date(2026, 9, 24)
+
+    assert select_days_to_publish(short_window_start, WINDOW_END, 7) == [short_window_start, WINDOW_END]
+
+
+def test_select_days_to_publish_rejects_an_inverted_window():
+    """
+    Tests that a window whose end precedes its start is rejected rather than publishing nothing.
+    """
+    with pytest.raises(PayloadError, match="is before window_start"):
+        select_days_to_publish(WINDOW_END, WINDOW_START, 2)
 
 
 def test_select_days_to_publish_rejects_an_empty_range():
@@ -103,7 +125,7 @@ def test_select_days_to_publish_rejects_an_empty_range():
     Tests that a misconfigured publish window is rejected rather than publishing nothing silently.
     """
     with pytest.raises(PayloadError, match="at least 1"):
-        select_days_to_publish(WINDOW_END, 0)
+        select_days_to_publish(WINDOW_START, WINDOW_END, 0)
 
 
 # --- Tests for encode_payload() / decode_payload() ---

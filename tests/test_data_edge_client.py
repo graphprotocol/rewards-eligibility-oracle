@@ -5,7 +5,7 @@ Unit tests for the DataEdgeClient.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from web3.exceptions import ContractLogicError
+from web3.exceptions import ContractLogicError, TransactionNotFound
 
 from src.models.data_edge_client import (
     FALLBACK_GAS_OVERHEAD,
@@ -43,6 +43,12 @@ def _build_web3(
     w3.eth.get_block.return_value = {"baseFeePerGas": 100}
     w3.eth.max_priority_fee = 10
     w3.eth.get_transaction_count.return_value = 7
+
+    # The hash comes from the signed transaction, so it is known before anything is broadcast
+    signed_tx = MagicMock()
+    signed_tx.hash.hex.return_value = TX_HASH_HEX
+    w3.eth.account.sign_transaction.return_value = signed_tx
+
     w3.eth.send_raw_transaction.return_value = MagicMock(hex=MagicMock(return_value=TX_HASH_HEX))
     w3.eth.wait_for_transaction_receipt.return_value = {"status": receipt_status}
     w3.to_wei.return_value = 1_000_000_000
@@ -199,6 +205,69 @@ class TestPostPayload:
 
         # Assert: broadcast exactly once, on the first provider only
         assert w3.eth.send_raw_transaction.call_count == 1
+        mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    def test_post_payload_does_not_retry_when_a_failed_broadcast_was_accepted(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a broadcast whose response was lost, but which the node did accept, is not retried.
+        The transaction can still be mined, so rotating would duplicate or underprice it.
+        """
+        # Arrange: the send call fails, but the node turns out to have the transaction
+        w3 = _build_web3()
+        w3.eth.send_raw_transaction.side_effect = Exception("connection reset")
+        w3.eth.get_transaction.return_value = {"hash": TX_HASH_HEX}
+        mock_web3.return_value = w3
+
+        # Act & Assert
+        with pytest.raises(DataEdgePendingError, match="accepted but the broadcast failed") as excinfo:
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        assert excinfo.value.tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+        mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    def test_post_payload_rotates_when_a_failed_broadcast_never_reached_the_node(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a broadcast the node confirms it never received is retried on the next provider,
+        since nothing is in flight to duplicate.
+        """
+        # Arrange: the send call fails and the node does not have the transaction
+        failing = _build_web3()
+        failing.eth.send_raw_transaction.side_effect = Exception("connection reset")
+        failing.eth.get_transaction.side_effect = TransactionNotFound("not found")
+        healthy = _build_web3()
+        mock_web3.side_effect = [failing, healthy]
+
+        # Act
+        tx_url = client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert
+        assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+        healthy.eth.send_raw_transaction.assert_called_once()
+
+
+    def test_post_payload_assumes_an_unanswerable_lookup_was_accepted(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a provider which can neither broadcast nor answer whether it holds the transaction
+        stops the publish. Treating an accepted transaction as never sent is the costlier mistake.
+        """
+        # Arrange: both the send and the follow-up lookup fail
+        w3 = _build_web3()
+        w3.eth.send_raw_transaction.side_effect = Exception("connection reset")
+        w3.eth.get_transaction.side_effect = Exception("provider unreachable")
+        mock_web3.return_value = w3
+
+        # Act & Assert
+        with pytest.raises(DataEdgePendingError):
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
         mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
 
 

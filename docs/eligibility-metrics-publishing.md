@@ -131,9 +131,28 @@ Makes each run's artifact self-describing once criteria have changed:
    increments both. They do not sum to `query_attempts - qualifying_queries`. They are not
    components of a whole and must not be rendered as one.
 2. **`query_attempts = 0` is a real row**, not missing data — the gateway routed nothing that day,
-   which is a routing problem, not a serving problem. Days with no attempts are emitted explicitly.
+   which is a routing problem, not a serving problem. Every indexer in the artifact has a row for
+   every day of the window, including the days it was routed nothing.
 3. **`is_online_day` is a historical record** computed with the thresholds in `run_metadata.json`.
    Simulation of other thresholds must recompute from `qualifying_queries` / `qualifying_subgraphs`.
+
+### Evaluated indexers are those with at least one attempt
+
+The oracle's only source is `metrics_indexer_attempts`, so its universe of indexers is exactly those
+that received at least one query attempt somewhere in the window. An indexer routed nothing across
+all 28 days appears in no artifact: not the daily grid, not the summary, not `indexers_evaluated`,
+not the payload. Point 2 above densifies *within* that set, not beyond it.
+
+This is pre-existing rather than new — the summary CSV has always had the property — and it changes
+no outcome, since an indexer with no attempts has no online days and is ineligible either way. But
+it is the indexer with the most to learn from "nothing was routed to you", so a consumer should
+handle it.
+
+**The roster belongs to the consumer.** Supplying one here would mean giving the oracle a second data
+source (the network subgraph, or a staking query) purely to emit zeros. The dashboard already reads
+its indexer roster from a subgraph, so it can render "in the network, no data at all" by noting which
+of its own addresses are absent from the grid. If that turns out to be the wrong division of labour,
+adding the roster to the oracle is a design change to make deliberately, not a bug fix.
 
 ### Implementation notes
 
@@ -225,8 +244,14 @@ subsequent payload decodes against the wrong addresses, silently. Inline address
 idempotent, and the ~8 KB per run they cost is a rounding error against the ~8 KB of calldata the
 oracle already sends to renew eligibility. Revisit if the indexer set grows by an order of magnitude.
 
-Absence encodes zero: an indexer with no query attempts on a day contributes no row, and the
-subgraph materializes the zero row for it.
+Absence within a published day encodes zero: an indexer that appears on one published day but not
+another was routed nothing on the day it is missing from, and the subgraph materializes the zero row.
+
+This only extends as far as the indexers a consumer already knows about. **Dropping the address
+registry also dropped the roster**, so nothing on chain enumerates who was evaluated, and an indexer
+routed nothing across the *whole* window never appears in any payload at all. See
+[Evaluated indexers](#evaluated-indexers-are-those-with-at-least-one-attempt) — the roster belongs to
+the consumer, and the dashboard already has one.
 
 ### Wire format
 

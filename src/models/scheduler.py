@@ -165,34 +165,13 @@ class Scheduler:
             credential_manager.prepare_credentials_for_adc()
 
             # Validate credentials early (Fail Fast)
-            try:
-                credential_manager.get_google_credentials()
-                logger.info("Google Cloud credentials validated successfully")
-
-            except ValueError as e:
-                logger.error(f"Failed to validate Google Cloud credentials: {e}")
-                raise
+            self._validate_google_credentials()
 
             # Load configuration
             config = load_config()
 
             # Create Slack notifier
-            self.slack_notifier = create_slack_notifier(
-                config.get("SLACK_WEBHOOK_URL"), config.get("BLOCKCHAIN_CHAIN_ID")
-            )
-            if self.slack_notifier:
-                logger.info("Slack notifications enabled for scheduler")
-                startup_message = (
-                    f"Rewards Eligibility Oracle scheduler started successfully.\n"
-                    f"**Scheduled time:** {config['SCHEDULED_RUN_TIME']} UTC\n"
-                    f"**Environment:** {os.environ.get('ENVIRONMENT', 'unknown')}"
-                )
-                self.slack_notifier.send_info_notification(
-                    message=startup_message,
-                    title="Scheduler Started",
-                )
-            else:
-                logger.info("Slack notifications disabled for scheduler")
+            self._start_slack_notifier(config)
 
             pytz.timezone("UTC")
             run_time = config["SCHEDULED_RUN_TIME"]
@@ -200,31 +179,71 @@ class Scheduler:
             schedule.every().day.at(run_time).do(self.run_oracle, run_date_override=None)
 
             self.update_healthcheck("Scheduler initialized")
-
-            if os.environ.get("RUN_ON_STARTUP", "false").lower() == "true":
-                logger.info("RUN_ON_STARTUP=true, executing oracle immediately")
-                self.run_oracle()
-            else:
-                # Check for missed runs
-                logger.info("Checking for missed runs...")
-                self.check_missed_runs()
+            self._run_now_or_catch_up()
 
             return config
 
         except Exception as e:
             logger.error(f"Failed to initialize scheduler: {e}", exc_info=True)
-            if not self.slack_notifier:
-                webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
-                if webhook_url:
-                    # Config may not have loaded yet, in which case the network stays unknown
-                    chain_id = config.get("BLOCKCHAIN_CHAIN_ID") if config else None
-                    self.slack_notifier = create_slack_notifier(webhook_url, chain_id)
-
-            if self.slack_notifier:
-                self.slack_notifier.send_failure_notification(
-                    error_message=str(e), stage="Scheduler Initialization", execution_time=0
-                )
+            self._notify_initialization_failure(e, config)
             sys.exit(1)
+
+
+    def _validate_google_credentials(self) -> None:
+        """Stop start-up straight away if the Google Cloud credentials cannot be loaded."""
+        try:
+            credential_manager.get_google_credentials()
+            logger.info("Google Cloud credentials validated successfully")
+
+        except ValueError as e:
+            logger.error(f"Failed to validate Google Cloud credentials: {e}")
+            raise
+
+
+    def _start_slack_notifier(self, config) -> None:
+        """Create the Slack notifier and announce the scheduler has started, when a webhook is configured."""
+        self.slack_notifier = create_slack_notifier(
+            config.get("SLACK_WEBHOOK_URL"), config.get("BLOCKCHAIN_CHAIN_ID")
+        )
+        if self.slack_notifier:
+            logger.info("Slack notifications enabled for scheduler")
+            startup_message = (
+                f"Rewards Eligibility Oracle scheduler started successfully.\n"
+                f"**Scheduled time:** {config['SCHEDULED_RUN_TIME']} UTC\n"
+                f"**Environment:** {os.environ.get('ENVIRONMENT', 'unknown')}"
+            )
+            self.slack_notifier.send_info_notification(
+                message=startup_message,
+                title="Scheduler Started",
+            )
+        else:
+            logger.info("Slack notifications disabled for scheduler")
+
+
+    def _run_now_or_catch_up(self) -> None:
+        """Run the oracle straight away when RUN_ON_STARTUP is true, otherwise catch up on a missed day."""
+        if os.environ.get("RUN_ON_STARTUP", "false").lower() == "true":
+            logger.info("RUN_ON_STARTUP=true, executing oracle immediately")
+            self.run_oracle()
+        else:
+            # Check for missed runs
+            logger.info("Checking for missed runs...")
+            self.check_missed_runs()
+
+
+    def _notify_initialization_failure(self, error, config) -> None:
+        """Report a failed start-up to Slack, building a notifier from the environment if none exists yet."""
+        if not self.slack_notifier:
+            webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+            if webhook_url:
+                # Config may not have loaded yet, in which case the network stays unknown
+                chain_id = config.get("BLOCKCHAIN_CHAIN_ID") if config else None
+                self.slack_notifier = create_slack_notifier(webhook_url, chain_id)
+
+        if self.slack_notifier:
+            self.slack_notifier.send_failure_notification(
+                error_message=str(error), stage="Scheduler Initialization", execution_time=0
+            )
 
 
     def run(self):

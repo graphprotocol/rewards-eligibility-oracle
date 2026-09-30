@@ -152,7 +152,7 @@ class BlockchainClient:
     def _connect_to_rpc(self) -> None:
         """Connect to the next available RPC provider."""
         initial_index = self.current_rpc_index
-        for i in range(len(self.rpc_providers)):
+        for _ in range(len(self.rpc_providers)):
             rpc_url = self.rpc_providers[self.current_rpc_index]
             provider_type = "primary" if self.current_rpc_index == 0 else f"backup #{self.current_rpc_index}"
 
@@ -565,7 +565,8 @@ class BlockchainClient:
             contract_func, indexer_addresses, data_bytes, tx_params, formatted_private_key
         )
 
-        # 8. Send transaction with nonce error handling and RPC rotation
+        # 8. Send transaction with nonce error handling and RPC rotation. Contract reverts are not retryable,
+        # so they propagate unchanged.
         try:
             return self._send_signed_transaction(signed_tx)
 
@@ -581,10 +582,6 @@ class BlockchainClient:
                 return self._execute_complete_transaction(params, rpc_rotation_count + 1)
 
             # Rotations exhausted - re-raise
-            raise
-
-        except TransactionRevertedError:
-            # Contract logic errors are not retryable - propagate immediately
             raise
 
 

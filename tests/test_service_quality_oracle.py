@@ -198,6 +198,7 @@ def test_main_succeeds_on_happy_path(oracle_context):
         ("get_creds", "Initialization"),
         ("load_config", "Initialization"),
         ("slack_create", "Initialization"),
+        ("cache_load", "Loading Cached Data"),
         ("bq_provider", "Data Fetching from BigQuery"),
         ("pipeline_process", "Data Processing and Artifact Generation"),
         ("pipeline_clean", "Data Processing and Artifact Generation"),
@@ -213,6 +214,7 @@ def test_main_handles_failures_at_each_stage(oracle_context, failing_component, 
         "get_creds": ctx["get_creds"],
         "load_config": ctx["load_config"],
         "slack_create": ctx["slack"]["create"],
+        "cache_load": ctx["pipeline"].load_eligible_indexers_from_csv,
         "bq_provider": ctx["bq_provider"].fetch_indexer_daily_metrics,
         "pipeline_process": ctx["pipeline"].process,
         "pipeline_clean": ctx["pipeline"].clean_old_date_directories,
@@ -220,6 +222,10 @@ def test_main_handles_failures_at_each_stage(oracle_context, failing_component, 
     }
     mock_to_fail = mock_map[failing_component]
     mock_to_fail.side_effect = error
+
+    # Cached data is only loaded when fresh cached data exists
+    if failing_component == "cache_load":
+        ctx["pipeline"].has_fresh_processed_data.return_value = True
 
     with pytest.raises(SystemExit) as excinfo:
         ctx["main"]()

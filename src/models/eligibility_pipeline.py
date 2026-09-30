@@ -19,6 +19,13 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Files written to each run date's output directory
+RAW_DATA_FILE = "indexer_issuance_eligibility_data.csv"
+ELIGIBLE_INDEXERS_FILE = "eligible_indexers.csv"
+INELIGIBLE_INDEXERS_FILE = "ineligible_indexers.csv"
+DAILY_METRICS_FILE = "indexer_daily_metrics.csv"
+RUN_METADATA_FILE = "run_metadata.json"
+
 # Per-day artifact columns, in output order
 DAILY_METRICS_COLUMNS = [
     "day",
@@ -106,13 +113,13 @@ class EligibilityPipeline:
         output_date_dir.mkdir(exist_ok=True, parents=True)
 
         # Save raw data for internal use
-        raw_data_path = output_date_dir / "indexer_issuance_eligibility_data.csv"
+        raw_data_path = output_date_dir / RAW_DATA_FILE
         raw_data.to_csv(raw_data_path, index=False)
         logger.info(f"Saved raw BigQuery results to: {raw_data_path}")
 
         # Save filtered data
-        eligible_path = output_date_dir / "eligible_indexers.csv"
-        ineligible_path = output_date_dir / "ineligible_indexers.csv"
+        eligible_path = output_date_dir / ELIGIBLE_INDEXERS_FILE
+        ineligible_path = output_date_dir / INELIGIBLE_INDEXERS_FILE
 
         eligible_df[["indexer"]].to_csv(eligible_path, index=False)
         ineligible_df[["indexer"]].to_csv(ineligible_path, index=False)
@@ -199,7 +206,7 @@ class EligibilityPipeline:
         output_date_dir = self.get_date_output_directory(current_date)
         output_date_dir.mkdir(exist_ok=True, parents=True)
 
-        daily_metrics_path = output_date_dir / "indexer_daily_metrics.csv"
+        daily_metrics_path = output_date_dir / DAILY_METRICS_FILE
         grid.to_csv(daily_metrics_path, index=False)
         logger.info(f"Saved {len(grid)} daily metric rows to: {daily_metrics_path}")
 
@@ -251,7 +258,7 @@ class EligibilityPipeline:
         output_date_dir = self.get_date_output_directory(current_date)
         output_date_dir.mkdir(exist_ok=True, parents=True)
 
-        metadata_path = output_date_dir / "run_metadata.json"
+        metadata_path = output_date_dir / RUN_METADATA_FILE
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
         logger.info(f"Saved run metadata to: {metadata_path}")
 
@@ -272,7 +279,7 @@ class EligibilityPipeline:
             FileNotFoundError: If no manifest exists for the given date
             ValueError: If the manifest cannot be parsed
         """
-        metadata_path = self.get_date_output_directory(current_date) / "run_metadata.json"
+        metadata_path = self.get_date_output_directory(current_date) / RUN_METADATA_FILE
 
         if not metadata_path.exists():
             raise FileNotFoundError(f"Run metadata not found: {metadata_path}")
@@ -301,7 +308,7 @@ class EligibilityPipeline:
             FileNotFoundError: If no grid exists for the given date
             ValueError: If the grid is malformed
         """
-        grid_path = self.get_date_output_directory(current_date) / "indexer_daily_metrics.csv"
+        grid_path = self.get_date_output_directory(current_date) / DAILY_METRICS_FILE
 
         if not grid_path.exists():
             raise FileNotFoundError(f"Daily metrics CSV not found: {grid_path}")
@@ -330,7 +337,7 @@ class EligibilityPipeline:
             current_date: The date whose manifest to update
             tx_url: Explorer URL of the publishing transaction
         """
-        metadata_path = self.get_date_output_directory(current_date) / "run_metadata.json"
+        metadata_path = self.get_date_output_directory(current_date) / RUN_METADATA_FILE
 
         try:
             metadata = self.load_run_metadata(current_date)
@@ -379,7 +386,7 @@ class EligibilityPipeline:
                     try:
                         shutil.rmtree(item)
                         directories_removed += 1
-                    except (FileNotFoundError, OSError) as e:
+                    except OSError as e:
                         # Directory already deleted by another process or became inaccessible
                         logger.debug(f"Directory {item} already removed or inaccessible: {e}")
                         continue
@@ -427,11 +434,11 @@ class EligibilityPipeline:
         # Define required files. The per-day artifacts are included so a cache hit cannot serve a run
         # whose grid or manifest is missing.
         required_files = [
-            "eligible_indexers.csv",
-            "indexer_issuance_eligibility_data.csv",
-            "ineligible_indexers.csv",
-            "indexer_daily_metrics.csv",
-            "run_metadata.json",
+            ELIGIBLE_INDEXERS_FILE,
+            RAW_DATA_FILE,
+            INELIGIBLE_INDEXERS_FILE,
+            DAILY_METRICS_FILE,
+            RUN_METADATA_FILE,
         ]
 
         # Check that all required files exist and are not empty
@@ -440,7 +447,7 @@ class EligibilityPipeline:
             try:
                 if not file_path.exists() or file_path.stat().st_size == 0:
                     return False
-            except (FileNotFoundError, OSError):
+            except OSError:
                 # File disappeared between exists() check and stat() call
                 logger.debug(f"File {file_path} disappeared during existence check")
                 return False
@@ -476,7 +483,7 @@ class EligibilityPipeline:
         for file in csv_files:
             try:
                 file_mtimes.append(file.stat().st_mtime)
-            except (FileNotFoundError, OSError):
+            except OSError:
                 # File disappeared between glob() and stat(), skip it
                 logger.debug(f"File {file} disappeared during age calculation")
                 continue
@@ -538,7 +545,7 @@ class EligibilityPipeline:
             ValueError: If the CSV file is malformed or empty
         """
         output_date_dir = self.get_date_output_directory(current_date)
-        eligible_file = output_date_dir / "eligible_indexers.csv"
+        eligible_file = output_date_dir / ELIGIBLE_INDEXERS_FILE
 
         if not eligible_file.exists():
             raise FileNotFoundError(f"Eligible indexers CSV not found: {eligible_file}")

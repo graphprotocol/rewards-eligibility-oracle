@@ -241,6 +241,18 @@ class TestSchedulerStateManagement:
         mock_dependencies.logger.error.assert_called_once()
 
 
+    def test_get_last_run_date_warns_and_returns_none_when_file_is_unreadable(
+        self, scheduler: Scheduler, mock_dependencies: SimpleNamespace
+    ):
+        """Tests that a last run file which exists but cannot be read is treated as no previous run."""
+        mock_dependencies.os.path.exists.return_value = True
+        mock_dependencies.open.side_effect = PermissionError("Permission denied")
+
+        assert scheduler.get_last_run_date() is None
+        mock_dependencies.logger.warning.assert_called_once()
+        mock_dependencies.logger.error.assert_not_called()
+
+
     def test_save_last_run_date_writes_correctly_to_file(
         self, scheduler: Scheduler, mock_dependencies: SimpleNamespace
     ):

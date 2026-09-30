@@ -5,6 +5,7 @@ Unit tests for the DataEdgeClient.
 from unittest.mock import MagicMock, patch
 
 import pytest
+from web3.exceptions import ContractLogicError
 
 from src.models.data_edge_client import (
     FALLBACK_GAS_OVERHEAD,
@@ -25,14 +26,17 @@ PAYLOAD = b"REfake-payload"
 TX_HASH_HEX = "abc123"
 
 
-def _build_web3(is_connected: bool = True, receipt_status: int = 1, estimate_gas_fails: bool = False):
+def _build_web3(
+    is_connected: bool = True, receipt_status: int = 1, estimate_gas_fails: bool = False, has_code: bool = True
+):
     """Build a mock Web3 instance that behaves like a healthy node unless told otherwise."""
     w3 = MagicMock()
     w3.is_connected.return_value = is_connected
+    w3.eth.get_code.return_value = b"\x60\x80" if has_code else b""
     w3.eth.account.from_key.return_value = MagicMock(address=SENDER_ADDRESS)
 
     if estimate_gas_fails:
-        w3.eth.estimate_gas.side_effect = Exception("execution reverted during estimation")
+        w3.eth.estimate_gas.side_effect = Exception("the method eth_estimateGas is not supported")
     else:
         w3.eth.estimate_gas.return_value = 500_000
 
@@ -220,6 +224,24 @@ class TestPostPayload:
         healthy.eth.send_raw_transaction.assert_called_once()
 
 
+    def test_post_payload_refuses_an_address_with_no_contract_code(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a misconfigured address is reported rather than published to. An address with no code
+        accepts the payload as a plain transfer and emits nothing, which would otherwise look like success.
+        """
+        # Arrange
+        w3 = _build_web3(has_code=False)
+        mock_web3.return_value = w3
+
+        # Act & Assert
+        with pytest.raises(RuntimeError, match="No contract code"):
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        w3.eth.send_raw_transaction.assert_not_called()
+
+
     def test_post_payload_skips_an_empty_payload(self, client: DataEdgeClient, mock_web3: MagicMock):
         """
         Tests that nothing is published when there is nothing to say, rather than paying for an empty
@@ -251,6 +273,26 @@ class TestPostPayload:
         transaction = w3.eth.account.sign_transaction.call_args.args[0]
         assert transaction["gas"] > FALLBACK_GAS_OVERHEAD
         assert transaction["gas"] == FALLBACK_GAS_OVERHEAD + len(PAYLOAD) * 24
+
+
+    def test_post_payload_does_not_send_a_payload_that_reverts_during_estimation(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a revert reported by gas estimation stops the publish before anything is sent, rather
+        than falling back to priced gas and paying for the same revert on chain.
+        """
+        # Arrange
+        w3 = _build_web3()
+        w3.eth.estimate_gas.side_effect = ContractLogicError("execution reverted")
+        mock_web3.return_value = w3
+
+        # Act & Assert
+        with pytest.raises(DataEdgeRevertedError, match="reverted during gas estimation"):
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        w3.eth.send_raw_transaction.assert_not_called()
+        mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
 
 
     def test_post_payload_applies_a_buffer_to_the_estimated_gas(

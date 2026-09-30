@@ -6,7 +6,8 @@ subgraph decodes into entities. A payload carries the run's provenance, the crit
 per-day metrics for the most recent days of the analysis window; the subgraph accumulates the rolling
 window from successive payloads.
 
-Wire format (all integers are unsigned LEB128 varints, all days are days since 1970-01-01):
+Wire format (all integers are unsigned LEB128 varints of at most 64 bits, all days are days since
+1970-01-01):
 
     payload  := magic(2 bytes) version(varint) message*
     message  := tag(varint) body
@@ -61,6 +62,9 @@ EPOCH = date(1970, 1, 1)
 # Length of an EVM address in bytes
 ADDRESS_LENGTH = 20
 
+# Largest value a varint may carry, so a subgraph mapping can decode every integer into a u64
+MAX_VARINT_VALUE = 2**64 - 1
+
 
 class PayloadError(Exception):
     """Raised when a payload cannot be encoded or decoded."""
@@ -70,6 +74,9 @@ def _encode_varint(value: int) -> bytes:
     """Encode a non-negative integer as an unsigned LEB128 varint."""
     if value < 0:
         raise PayloadError(f"Cannot encode negative value as a varint: {value}")
+
+    if value > MAX_VARINT_VALUE:
+        raise PayloadError(f"Cannot encode a value wider than 64 bits as a varint: {value}")
 
     encoded = bytearray()
     while True:
@@ -92,10 +99,15 @@ def _decode_varint(payload: bytes, offset: int) -> Tuple[int, int]:
         byte = payload[offset]
         offset += 1
         value |= (byte & 0x7F) << shift
+        if value > MAX_VARINT_VALUE:
+            raise PayloadError("Varint does not fit in 64 bits")
+
         if not byte & 0x80:
             return value, offset
 
         shift += 7
+        if shift > 63:
+            raise PayloadError("Varint is longer than 64 bits")
 
 
 def _encode_address(address: str) -> bytes:
@@ -174,7 +186,7 @@ def encode_payload(
     payload += _encode_varint(ENCODING_VERSION)
 
     # Provenance, so a consumer can tell which run and window a payload describes
-    payload.append(TAG_RUN_INFO)
+    payload += _encode_varint(TAG_RUN_INFO)
     payload += _encode_day(run_date)
     payload += _encode_day(window_start)
     payload += _encode_day(window_end)
@@ -182,7 +194,7 @@ def encode_payload(
     payload += _encode_varint(indexers_eligible)
 
     # Thresholds, without which is_online_day cannot be interpreted
-    payload.append(TAG_CRITERIA)
+    payload += _encode_varint(TAG_CRITERIA)
     for field in CRITERIA_FIELDS:
         value = criteria.get(field)
         if value is None:
@@ -202,7 +214,7 @@ def encode_payload(
         # Skip indexers routed nothing that day; their absence is what encodes the zero row
         rows = [row for row in rows_by_day.get(day.isoformat(), []) if int(row["query_attempts"]) > 0]
 
-        payload.append(TAG_DAILY_METRICS)
+        payload += _encode_varint(TAG_DAILY_METRICS)
         payload += _encode_day(day)
         payload += _encode_varint(len(rows))
 
@@ -238,8 +250,7 @@ def decode_payload(payload: bytes) -> Dict[str, Any]:
     decoded: Dict[str, Any] = {"version": version, "run_info": None, "criteria": None, "daily_metrics": []}
 
     while offset < len(payload):
-        tag = payload[offset]
-        offset += 1
+        tag, offset = _decode_varint(payload, offset)
 
         if tag == TAG_RUN_INFO:
             run_day, offset = _decode_day(payload, offset)

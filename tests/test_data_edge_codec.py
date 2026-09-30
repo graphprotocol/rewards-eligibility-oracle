@@ -59,7 +59,7 @@ def daily_rows() -> list:
 # --- Tests for varint encoding ---
 
 
-@pytest.mark.parametrize("value", [0, 1, 127, 128, 255, 300, 16383, 16384, 2**32, 2**64])
+@pytest.mark.parametrize("value", [0, 1, 127, 128, 255, 300, 16383, 16384, 2**32, 2**64 - 1])
 def test_varint_round_trips(value: int):
     """
     Tests that varints survive a round trip across the byte-boundary values where the encoding changes
@@ -306,3 +306,38 @@ def test_decode_payload_rejects_an_unknown_message_tag():
 
     with pytest.raises(PayloadError, match="Unknown message tag"):
         decode_payload(unknown_tag)
+
+
+def test_decode_payload_reads_message_tags_as_varints():
+    """
+    Tests that a tag is read as a varint, as the wire format states, so a tag of 128 or more is not
+    split into a 1-byte tag followed by a stray byte.
+    """
+    multi_byte_tag = PAYLOAD_MAGIC + _encode_varint(ENCODING_VERSION) + _encode_varint(300)
+
+    with pytest.raises(PayloadError, match="Unknown message tag: 0x12c"):
+        decode_payload(multi_byte_tag)
+
+
+def test_encode_varint_rejects_values_wider_than_64_bits():
+    """
+    Tests that the encoder never writes a value a subgraph mapping could not hold in a u64.
+    """
+    with pytest.raises(PayloadError, match="wider than 64 bits"):
+        _encode_varint(2**64)
+
+
+@pytest.mark.parametrize(
+    "encoded, message",
+    [
+        (b"\xff" * 9 + b"\x02", "does not fit in 64 bits"),
+        (b"\x80" * 10 + b"\x00", "longer than 64 bits"),
+    ],
+    ids=["value_overflows", "too_many_bytes"],
+)
+def test_decode_varint_rejects_varints_wider_than_64_bits(encoded: bytes, message: str):
+    """
+    Tests that the decoder refuses a varint wider than the format allows instead of reading on.
+    """
+    with pytest.raises(PayloadError, match=message):
+        _decode_varint(encoded, 0)

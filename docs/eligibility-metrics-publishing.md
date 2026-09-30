@@ -232,8 +232,8 @@ subgraph materializes the zero row for it.
 
 Implemented in [`src/utils/data_edge_codec.py`](../src/utils/data_edge_codec.py), which is the
 normative reference; the decoder in that module mirrors what a subgraph mapping must do and is what
-the tests assert against. All integers are unsigned LEB128 varints, all days are days since
-1970-01-01.
+the tests assert against. All integers are unsigned LEB128 varints of at most 64 bits, so a mapping
+can decode them into a u64, and all days are days since 1970-01-01.
 
 ```
 payload  := magic("RE") version(varint) message*
@@ -287,6 +287,9 @@ Three properties worth keeping if the format is revised:
   BigQuery data can all restate a day.
 - **The cache path does not publish.** A re-run within the 30-minute cache window republishes
   nothing, since the run it is replaying already published.
+- **Missing data is not published as zeros.** If none of the published days has a single query
+  attempt, the source data has not arrived, so the run skips publishing and alerts (OpsGenie P4).
+  Publishing would record every indexer as routed nothing, and the older day is never restated.
 
 ---
 

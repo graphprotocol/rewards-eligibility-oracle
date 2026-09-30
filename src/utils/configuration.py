@@ -24,6 +24,10 @@ else:
 
 logger = logging.getLogger(__name__)
 
+# Trailing days of the window each run publishes to DataEdge when the config does not say, so that the
+# next run restates the day that was still in progress when this one read it
+DEFAULT_DATA_EDGE_PUBLISH_DAYS = 2
+
 
 class ConfigurationError(Exception):
     """Raised when configuration loading or validation fails."""
@@ -130,8 +134,8 @@ class ConfigLoader:
         # Helper to safely convert values to integers
 
 
-        def to_int(v):
-            return int(v) if v is not None and v != "" else None
+        def to_int(v, default=None):
+            return int(v) if v is not None and v != "" else default
 
         # fmt: off
         # Convert nested structure to flat format
@@ -167,7 +171,8 @@ class ConfigLoader:
                 "DATA_EDGE_CONTRACT_ADDRESS"
             ),
             "DATA_EDGE_PUBLISH_DAYS": to_int(
-                substituted_config.get("blockchain", {}).get("DATA_EDGE_PUBLISH_DAYS")
+                substituted_config.get("blockchain", {}).get("DATA_EDGE_PUBLISH_DAYS"),
+                default=DEFAULT_DATA_EDGE_PUBLISH_DAYS,
             ),
 
             # Scheduling
@@ -282,6 +287,19 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ConfigurationError(
             f"Invalid SCHEDULED_RUN_TIME: {config['SCHEDULED_RUN_TIME']} - must be in HH:MM format."
         )
+
+    # DataEdge publishing is optional, so its settings are only checked once an address switches it on
+    data_edge_address = config.get("DATA_EDGE_CONTRACT_ADDRESS")
+    if data_edge_address:
+        if not re.fullmatch(r"0x[0-9a-fA-F]{40}", data_edge_address):
+            raise ConfigurationError(
+                f"Invalid DATA_EDGE_CONTRACT_ADDRESS: {data_edge_address} - "
+                "must be 0x followed by 40 hex characters."
+            )
+
+        publish_days = config.get("DATA_EDGE_PUBLISH_DAYS")
+        if publish_days is None or publish_days < 1:
+            raise ConfigurationError(f"Invalid DATA_EDGE_PUBLISH_DAYS: {publish_days} - must be at least 1.")
 
     return config
 

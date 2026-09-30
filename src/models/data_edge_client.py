@@ -13,6 +13,7 @@ import logging
 from typing import List, Optional
 
 from web3 import Web3
+from web3.exceptions import ContractLogicError
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ FALLBACK_GAS_OVERHEAD = 100_000
 
 class DataEdgeRevertedError(Exception):
     """
-    Raised when a publishing transaction is mined but reverts.
+    Raised when a publishing transaction reverts, whether mined or during gas estimation.
 
     A revert is deterministic, so it is not retried on another provider: doing so would mine, and pay
     for, the same failing transaction once per configured RPC provider.
@@ -99,6 +100,10 @@ class DataEdgeClient:
             estimated = w3.eth.estimate_gas({"from": sender_address, "to": self.contract_address, "data": payload})
             return int(estimated * GAS_LIMIT_BUFFER)
 
+        # The node ran the call and it reverted, so sending it would only pay for the same revert
+        except ContractLogicError as e:
+            raise DataEdgeRevertedError(f"DataEdge payload reverted during gas estimation: {e}") from e
+
         # Some providers refuse to estimate for a fallback-only contract, so price the payload instead
         except Exception as e:
             fallback = (
@@ -147,6 +152,11 @@ class DataEdgeClient:
         w3 = Web3(Web3.HTTPProvider(rpc_url))
         if not w3.is_connected():
             raise ConnectionError(f"Could not connect to RPC provider: {rpc_url}")
+
+        # An address with no code accepts the payload as a plain transfer and emits nothing, so a wrong
+        # address would otherwise look like a successful publish on every run
+        if not w3.eth.get_code(self.contract_address):
+            raise ValueError(f"No contract code at DataEdge address {self.contract_address}")
 
         account = w3.eth.account.from_key(private_key)
         sender_address = Web3.to_checksum_address(account.address)

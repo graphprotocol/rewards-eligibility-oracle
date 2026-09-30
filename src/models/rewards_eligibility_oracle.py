@@ -41,6 +41,7 @@ def publish_daily_metrics_to_data_edge(
     run_date: date,
     window_start: date,
     window_end: date,
+    criteria: dict,
     indexers_evaluated: int,
     indexers_eligible: int,
 ) -> Optional[str]:
@@ -57,11 +58,14 @@ def publish_daily_metrics_to_data_edge(
         run_date: The date of the run
         window_start: First day of the analysis window
         window_end: Last day of the analysis window
+        criteria: Eligibility thresholds the grid was produced under, which a payload carries so that
+            is_online_day can be interpreted without any prior state
         indexers_evaluated: Number of indexers the run considered
         indexers_eligible: Number of indexers the run found eligible
 
     Returns:
-        Optional[str]: Explorer URL of the publishing transaction, or None if skipped or failed
+        Optional[str]: Explorer URL of a confirmed publish, or None if it was skipped, failed, or
+            broadcast without its outcome being established
     """
     contract_address = config.get("DATA_EDGE_CONTRACT_ADDRESS")
     if not contract_address:
@@ -95,12 +99,7 @@ def publish_daily_metrics_to_data_edge(
             run_date=run_date,
             window_start=window_start,
             window_end=window_end,
-            criteria={
-                "MIN_ONLINE_DAYS": config["MIN_ONLINE_DAYS"],
-                "MIN_SUBGRAPHS": config["MIN_SUBGRAPHS"],
-                "MAX_LATENCY_MS": config["MAX_LATENCY_MS"],
-                "MAX_BLOCKS_BEHIND": config["MAX_BLOCKS_BEHIND"],
-            },
+            criteria=criteria,
             daily_rows=daily_metrics_grid.to_dict("records"),
             indexers_evaluated=indexers_evaluated,
             indexers_eligible=indexers_eligible,
@@ -117,7 +116,9 @@ def publish_daily_metrics_to_data_edge(
 
         return data_edge_client.post_payload(payload, config["PRIVATE_KEY"])
 
-    # The transaction reached the network, so report it as unresolved rather than failed
+    # The transaction reached the network, so report it as unresolved rather than failed. It is not
+    # returned as a confirmed publish: leaving it unrecorded means a later run retries it, and a repeat
+    # is a restatement to a consumer, whereas an unrecorded loss cannot be recovered.
     except DataEdgePendingError as e:
         logger.warning(f"Daily metrics transaction broadcast but unconfirmed: {e}")
         send_opsgenie_alert_safe(
@@ -127,9 +128,10 @@ def publish_daily_metrics_to_data_edge(
             priority="P4",
         )
 
-        return e.tx_url
+        return None
 
-    # A failure here leaves the run's artifacts on disk, so the data is recoverable and can be re-published
+    # The run's artifacts stay on disk and its manifest records no transaction, so a later run serving
+    # the same artifacts retries the publish from them
     except Exception as e:
         logger.error(f"Failed to publish daily metrics to DataEdge: {e}", exc_info=True)
         send_opsgenie_alert_safe(
@@ -198,10 +200,19 @@ def main(run_date_override: date = None):
         # Initialize pipeline early to check for cached data
         pipeline = EligibilityPipeline(project_root=project_root_path)
 
-        # Only a run that produced per-day metrics publishes them, so a cache hit does not republish
-        # what the run it is replaying already published
+        # What this run will publish, if anything. A run that produced per-day metrics publishes its
+        # own; a run serving cached artifacts publishes theirs only when they have still to reach the
+        # chain, so that a publish which failed is retried rather than lost with the window.
         daily_metrics_grid = None
         indexers_evaluated = 0
+        publish_window_start = start_date
+        publish_window_end = end_date
+        publish_criteria = {
+            "MIN_ONLINE_DAYS": config["MIN_ONLINE_DAYS"],
+            "MIN_SUBGRAPHS": config["MIN_SUBGRAPHS"],
+            "MAX_LATENCY_MS": config["MAX_LATENCY_MS"],
+            "MAX_BLOCKS_BEHIND": config["MAX_BLOCKS_BEHIND"],
+        }
 
         # Check for fresh cached data first (30 minutes by default)
         cache_max_age_minutes = int(config.get("CACHE_MAX_AGE_MINUTES", 30))
@@ -218,8 +229,21 @@ def main(run_date_override: date = None):
                     f"Loaded {len(eligible_indexers)} eligible indexers from cache - "
                     "skipping BigQuery and processing"
                 )
-            except (FileNotFoundError, ValueError) as cache_error:
+
+                # Pick up a publish the run that wrote these artifacts did not complete. Its manifest
+                # describes them, so it, not this run's config, says what the payload should carry.
+                cached_metadata = pipeline.load_run_metadata(current_run_date)
+                if config.get("DATA_EDGE_CONTRACT_ADDRESS") and not cached_metadata.get("published_tx"):
+                    logger.info(f"Cached metrics for {current_run_date} are unpublished - retrying publish")
+                    daily_metrics_grid = pipeline.load_daily_metrics_from_csv(current_run_date)
+                    publish_window_start = date.fromisoformat(cached_metadata["window_start"])
+                    publish_window_end = date.fromisoformat(cached_metadata["window_end"])
+                    publish_criteria = cached_metadata["criteria"]
+                    indexers_evaluated = cached_metadata["indexers_evaluated"]
+
+            except (FileNotFoundError, ValueError, KeyError) as cache_error:
                 logger.warning(f"Failed to load cached data: {cache_error}. Falling back to BigQuery.")
+                daily_metrics_grid = None
                 force_refresh = True
 
         if force_refresh or not pipeline.has_fresh_processed_data(current_run_date, cache_max_age_minutes):
@@ -313,15 +337,20 @@ def main(run_date_override: date = None):
             submission_error = e
 
         if daily_metrics_grid is not None:
-            publish_daily_metrics_to_data_edge(
+            published_tx = publish_daily_metrics_to_data_edge(
                 config=config,
                 daily_metrics_grid=daily_metrics_grid,
                 run_date=current_run_date,
-                window_start=start_date,
-                window_end=end_date,
+                window_start=publish_window_start,
+                window_end=publish_window_end,
+                criteria=publish_criteria,
                 indexers_evaluated=indexers_evaluated,
                 indexers_eligible=len(eligible_indexers),
             )
+
+            # Only a confirmed publish is recorded, so anything else is retried by a later run
+            if published_tx:
+                pipeline.record_published_transaction(current_run_date, published_tx)
 
         if submission_error is not None:
             raise submission_error

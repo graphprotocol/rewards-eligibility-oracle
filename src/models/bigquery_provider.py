@@ -176,6 +176,11 @@ class BigQueryProvider:
         An indexer is eligible once its online days reach min_online_days. Returns a DataFrame with
         columns indexer, query_attempts, good_responses, total_good_days_online,
         unique_good_response_subgraphs and eligible_for_indexing_rewards (1 if eligible, else 0).
+
+        Covers exactly the indexers present in daily_metrics, which are those that received at least
+        one query attempt in the window. An indexer that received none is absent from the attempts
+        table and so from this summary; it has no online days and would be ineligible either way, so
+        its absence changes no outcome.
         """
         # Preserve the output structure when the window contains no data at all
         if daily_metrics is None or daily_metrics.empty:

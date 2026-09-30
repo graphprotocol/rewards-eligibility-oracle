@@ -119,11 +119,17 @@ Makes each run's artifact self-describing once criteria have changed:
                 "MAX_LATENCY_MS": 5000, "MAX_BLOCKS_BEHIND": 50000 },
   "source": "bigquery",
   "indexers_evaluated": 189,
-  "indexers_eligible": 142
+  "indexers_eligible": 142,
+  "published_tx": null
 }
 ```
 
-`source` is `bigquery` or `cache`, reflecting the 30-minute cache path.
+`source` records how the artifacts were produced, so it always reads `bigquery`: a run serving cached
+artifacts leaves the manifest of the run that produced them in place rather than rewriting it.
+
+`published_tx` is `null` until the per-day metrics are confirmed on chain, and is then set to the
+transaction. It is what lets a later run tell a publish that has still to happen from one already
+done, rather than repeating or skipping it blindly.
 
 ### Semantics that consumers must respect
 
@@ -310,8 +316,16 @@ Three properties worth keeping if the format is revised:
   before the broadcast still rotate normally, since nothing is in flight.
 - **Idempotent by `(indexer, day)`** so catch-up runs, the publish overlap, and late-arriving
   BigQuery data can all restate a day.
-- **The cache path does not publish.** A re-run within the 30-minute cache window republishes
-  nothing, since the run it is replaying already published.
+- **A cache hit retries an unfinished publish, and only that.** The manifest records `published_tx`
+  once a publish is confirmed, so a re-run inside the 30-minute cache window republishes nothing when
+  the artifacts already reached the chain, and publishes them from disk when they did not. Without
+  this a failed publish could never be retried: the natural recovery, re-running the service, takes
+  the cached path, and the day the next run's overlap does not cover would be lost for good. A retry
+  publishes under the window and criteria in the manifest, not the current config, since those are
+  what produced the grid.
+- **Only a confirmed publish is recorded.** One that was broadcast without its outcome established
+  stays unrecorded, so a later run retries it. A repeat is a restatement to a consumer, keyed by
+  indexer and day, whereas an unrecorded loss cannot be recovered once the window moves on.
 - **Missing data is not published as zeros.** If none of the published days has a single query
   attempt, the source data has not arrived, so the run skips publishing and alerts (OpsGenie P4).
   Publishing would record every indexer as routed nothing, and the older day is never restated.

@@ -577,6 +577,96 @@ def test_write_run_metadata_records_the_criteria_that_produced_the_run(pipeline:
     assert metadata["indexers_eligible"] == 1
 
 
+def test_write_run_metadata_starts_with_no_published_transaction(pipeline: EligibilityPipeline):
+    """
+    Tests that a fresh manifest records that its metrics have still to reach the chain, which is what
+    lets a later run tell a publish that failed from one already done.
+    """
+    # Act
+    path = pipeline.write_run_metadata(
+        current_date=date(2025, 1, 3),
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        criteria={"MIN_ONLINE_DAYS": 5},
+        source="bigquery",
+        indexers_evaluated=2,
+        indexers_eligible=1,
+    )
+
+    # Assert
+    assert json.loads(path.read_text())["published_tx"] is None
+
+
+def test_record_published_transaction_marks_the_run_as_published(pipeline: EligibilityPipeline):
+    """
+    Tests that a confirmed publish is recorded in the manifest, so that a later run serving the same
+    artifacts does not pay to publish them again.
+    """
+    # Arrange
+    current_date_val = date(2025, 1, 3)
+    pipeline.write_run_metadata(
+        current_date=current_date_val,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        criteria={"MIN_ONLINE_DAYS": 5},
+        source="bigquery",
+        indexers_evaluated=2,
+        indexers_eligible=1,
+    )
+
+    # Act
+    pipeline.record_published_transaction(current_date_val, "https://arbiscan.io/tx/0xabc")
+
+    # Assert: the rest of the manifest survives the update
+    metadata = pipeline.load_run_metadata(current_date_val)
+    assert metadata["published_tx"] == "https://arbiscan.io/tx/0xabc"
+    assert metadata["indexers_eligible"] == 1
+
+
+def test_record_published_transaction_survives_a_missing_manifest(
+    pipeline: EligibilityPipeline, caplog: pytest.LogCaptureFixture
+):
+    """
+    Tests that a manifest which cannot be updated does not raise. The publish itself already
+    succeeded, so failing here would fail a run over bookkeeping.
+    """
+    # Act
+    with caplog.at_level(logging.ERROR):
+        pipeline.record_published_transaction(date(2025, 1, 3), "https://arbiscan.io/tx/0xabc")
+
+    # Assert
+    assert "Failed to record the published metrics transaction" in caplog.text
+
+
+def test_load_daily_metrics_round_trips_the_grid(pipeline: EligibilityPipeline, daily_metrics_data: pd.DataFrame):
+    """
+    Tests that a written grid can be read back for republishing, with days still as the strings the
+    payload encoder expects.
+    """
+    # Arrange
+    current_date_val = date(2025, 1, 3)
+    written = pipeline.write_daily_metrics(daily_metrics_data, current_date_val, WINDOW_START, WINDOW_END)
+
+    # Act
+    loaded = pipeline.load_daily_metrics_from_csv(current_date_val)
+
+    # Assert
+    assert len(loaded) == len(written)
+    assert loaded["day"].tolist() == written["day"].tolist()
+    assert loaded["day"].iloc[0] == "2025-01-01"
+    assert loaded["query_attempts"].sum() == written["query_attempts"].sum()
+
+
+@pytest.mark.parametrize("loader", ["load_daily_metrics_from_csv", "load_run_metadata"], ids=["grid", "manifest"])
+def test_loaders_fail_when_the_artifact_is_missing(pipeline: EligibilityPipeline, loader: str):
+    """
+    Tests that a missing artifact is reported rather than silently treated as empty, so the caller
+    can fall back to a fresh run.
+    """
+    with pytest.raises(FileNotFoundError):
+        getattr(pipeline, loader)(date(2025, 1, 3))
+
+
 def test_has_existing_processed_data_requires_the_per_day_artifacts(
     pipeline: EligibilityPipeline, sample_data: pd.DataFrame, daily_metrics_data: pd.DataFrame
 ):

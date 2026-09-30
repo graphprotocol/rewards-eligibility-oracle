@@ -134,7 +134,11 @@ def _encode_day(day: date) -> bytes:
 def _decode_day(payload: bytes, offset: int) -> Tuple[date, int]:
     """Decode a date stored as days since the epoch."""
     days, offset = _decode_varint(payload, offset)
-    return EPOCH + timedelta(days=days), offset
+    try:
+        day = EPOCH + timedelta(days=days)
+    except OverflowError as e:
+        raise PayloadError("Encoded day is outside the supported date range") from e
+    return day, offset
 
 
 def select_days_to_publish(window_start: date, window_end: date, publish_days: int) -> List[date]:

@@ -285,6 +285,7 @@ class DataEdgeClient:
                 w3 = self._connect(rpc_url)
                 if signed_tx is None:
                     signed_tx = self._sign_transaction(w3, payload, private_key)
+                    logger.info(f"Signed DataEdge transaction 0x{signed_tx.hash.hex().removeprefix('0x')}")
 
                 tx_hash = self._send_and_confirm(w3, signed_tx)
                 tx_url = f"{self.block_explorer_url}/tx/0x{tx_hash}"
@@ -307,7 +308,13 @@ class DataEdgeClient:
                 logger.warning(f"Failed to publish DataEdge payload via {rpc_url}: {e}")
                 last_error = e
 
+        # A failed send may still have reached a node, so name the transaction for checking on chain
+        sent_as = ""
+        if signed_tx is not None:
+            tx_hash_hex = signed_tx.hash.hex().removeprefix("0x")
+            sent_as = f" If a send reached a node, it is {self.block_explorer_url}/tx/0x{tx_hash_hex}."
+
         raise RuntimeError(
-            f"Failed to publish DataEdge payload via all {len(self.rpc_providers)} RPC providers. "
+            f"Failed to publish DataEdge payload via all {len(self.rpc_providers)} RPC providers.{sent_as} "
             f"Last error: {last_error}"
         )

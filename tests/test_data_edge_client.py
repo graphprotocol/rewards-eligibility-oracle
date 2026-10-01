@@ -2,6 +2,7 @@
 Unit tests for the DataEdgeClient.
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -334,19 +335,23 @@ class TestPostPayload:
 
 
     def test_post_payload_fails_when_no_provider_accepts_the_transaction(
-        self, client: DataEdgeClient, mock_web3: MagicMock
+        self, client: DataEdgeClient, mock_web3: MagicMock, caplog: pytest.LogCaptureFixture
     ):
         """
         Tests that a transaction every provider turns away fails the publish, having been signed only once.
+        A send that failed may still have reached a node, so the hash is logged before sending and named
+        in the failure, leaving something to check on chain.
         """
         # Arrange
         mock_web3.return_value = _build_web3()
         mock_web3.return_value.eth.send_raw_transaction.side_effect = Exception("connection reset")
 
         # Act & Assert
-        with pytest.raises(RuntimeError, match="all 2 RPC providers"):
+        with caplog.at_level(logging.INFO), pytest.raises(RuntimeError, match="all 2 RPC providers") as excinfo:
             client.post_payload(PAYLOAD, PRIVATE_KEY)
 
+        assert f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}" in str(excinfo.value)
+        assert f"Signed DataEdge transaction 0x{TX_HASH_HEX}" in caplog.text
         assert mock_web3.return_value.eth.account.sign_transaction.call_count == 1
         assert mock_web3.return_value.eth.send_raw_transaction.call_count == 2
 

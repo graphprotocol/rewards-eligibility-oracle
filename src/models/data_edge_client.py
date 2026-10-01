@@ -10,11 +10,10 @@ the transactions that renew indexer eligibility, and the two have no shared fail
 """
 
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from hexbytes import HexBytes
 from web3 import Web3
-from web3.exceptions import ContractLogicError, TransactionNotFound
+from web3.exceptions import ContractLogicError, TimeExhausted, TransactionNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +27,13 @@ FALLBACK_GAS_PER_CALLDATA_BYTE = 16
 FALLBACK_GAS_PER_LOG_BYTE = 8
 FALLBACK_GAS_OVERHEAD = 100_000
 
+# How nodes reject a transaction they already hold, which means an earlier send of the same signed
+# transaction got through, so it is waited on rather than failed
+ALREADY_SENT_MESSAGES = ("already known", "known transaction", "already imported")
+
+# How nodes reject a transaction whose nonce is already used, whether by this transaction or another
+NONCE_USED_MESSAGE = "nonce too low"
+
 
 class DataEdgeRevertedError(Exception):
     """
@@ -40,17 +46,30 @@ class DataEdgeRevertedError(Exception):
 
 class DataEdgePendingError(Exception):
     """
-    Raised when a publishing transaction was broadcast but its outcome could not be established.
+    Raised when a publishing transaction was sent but not seen mined, in time or through any provider.
 
-    The transaction may still be mined, so it is not retried on another provider. Retrying would
-    either duplicate the publish under the next nonce, or be rejected as an underpriced replacement,
-    and in neither case could the caller tell which transaction survived. Carries the transaction
-    hash so the outcome can be checked by hand.
+    It may still be mined, so it is reported as unresolved rather than failed. Carries the
+    transaction hash so the outcome can be checked by hand.
     """
 
     def __init__(self, message: str, tx_url: str):
         super().__init__(message)
         self.tx_url = tx_url
+
+
+class NonceAlreadyUsedError(Exception):
+    """Raised when another transaction has taken the nonce a publish was signed with, so it can never be mined."""
+
+
+class ReceiptUnavailableError(Exception):
+    """Raised when a provider fails while waiting for a sent transaction, leaving another to confirm it."""
+
+
+def _was_already_sent(error: Exception) -> bool:
+    """Tell whether a send failed only because the node already has, or has mined, the transaction."""
+    message = str(error).lower()
+
+    return any(text in message for text in ALREADY_SENT_MESSAGES)
 
 
 class DataEdgeClient:
@@ -138,52 +157,27 @@ class DataEdgeClient:
         return base_fee, max_priority_fee
 
 
-    def _node_has_transaction(self, w3: Web3, tx_hash: HexBytes) -> bool:
-        """
-        Check whether a node already knows a transaction, to resolve an ambiguous broadcast.
-
-        Defaults to True when the question cannot be answered, since treating an accepted transaction
-        as never sent is the more expensive mistake: the retry would either duplicate the publish under
-        the next nonce or be rejected as an underpriced replacement.
-
-        Args:
-            w3: Connected Web3 instance
-            tx_hash: Hash of the signed transaction
-
-        Returns:
-            bool: True if the node has the transaction, or if it could not be established
-        """
-        # Look the transaction up, which answers the question directly when the node responds
-        try:
-            w3.eth.get_transaction(tx_hash)
-            return True
-
-        # The node answered and does not have it, so nothing reached the network through this provider
-        except TransactionNotFound:
-            return False
-
-        except Exception as e:
-            logger.warning(f"Could not establish whether 0x{tx_hash.hex().removeprefix('0x')} was sent: {e}")
-
-            return True
-
-
-    def _publish_via_provider(self, rpc_url: str, payload: bytes, private_key: str) -> str:
-        """
-        Publish a payload through a single RPC provider and return the transaction hash.
-
-        Args:
-            rpc_url: RPC provider to use
-            payload: Calldata to publish
-            private_key: Key to sign the transaction with
-
-        Returns:
-            str: Transaction hash, without a 0x prefix
-        """
+    def _connect(self, rpc_url: str) -> Web3:
+        """Connect to an RPC provider, failing if it cannot be reached."""
         w3 = Web3(Web3.HTTPProvider(rpc_url))
         if not w3.is_connected():
             raise ConnectionError(f"Could not connect to RPC provider: {rpc_url}")
 
+        return w3
+
+
+    def _sign_transaction(self, w3: Web3, payload: bytes, private_key: str) -> Any:
+        """
+        Build and sign the publishing transaction, pricing it and taking its nonce from the given provider.
+
+        Args:
+            w3: Connected Web3 instance
+            payload: Calldata to publish
+            private_key: Key to sign the transaction with
+
+        Returns:
+            SignedTransaction: The signed transaction, ready to send through any provider
+        """
         # An address with no code accepts the payload as a plain transfer and emits nothing, so a wrong
         # address would otherwise look like a successful publish on every run
         if not w3.eth.get_code(self.contract_address):
@@ -207,37 +201,63 @@ class DataEdgeClient:
             "maxPriorityFeePerGas": max_priority_fee,
         }
 
-        signed_tx = w3.eth.account.sign_transaction(transaction, private_key)
+        return w3.eth.account.sign_transaction(transaction, private_key)
 
-        # The hash is known before the broadcast, so a lost response can still be resolved by it
+
+    def _send_and_confirm(self, w3: Web3, signed_tx: Any) -> str:
+        """
+        Send a signed transaction through a provider and wait for it to be mined.
+
+        Args:
+            w3: Connected Web3 instance
+            signed_tx: The signed publishing transaction
+
+        Returns:
+            str: Transaction hash, without a 0x prefix
+        """
         tx_hash_hex = signed_tx.hash.hex().removeprefix("0x")
         tx_url = f"{self.block_explorer_url}/tx/0x{tx_hash_hex}"
 
-        # Everything up to here can be retried freely, because nothing has reached the network yet
+        # A node that already has this transaction, from an earlier provider's send, turns it away as a
+        # duplicate. It was still sent, so it is waited on like any other.
         try:
-            tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-        # The node may have accepted the transaction before the response was lost, so ask whether it
-        # did rather than assuming either way
         except Exception as e:
-            if self._node_has_transaction(w3, signed_tx.hash):
-                raise DataEdgePendingError(
-                    f"DataEdge transaction was accepted but the broadcast failed ({e}): {tx_url}", tx_url
-                ) from e
+            if _was_already_sent(e):
+                logger.info(f"DataEdge transaction 0x{tx_hash_hex} was already sent ({e})")
 
-            raise
+            # A used nonce is this transaction's own only if the node has it. Otherwise another transaction
+            # took it, as when the nonce was read from a node that was behind, and this one can never be mined.
+            elif NONCE_USED_MESSAGE in str(e).lower():
+                try:
+                    w3.eth.get_transaction(signed_tx.hash)
+
+                except TransactionNotFound:
+                    raise NonceAlreadyUsedError(
+                        f"Nonce of 0x{tx_hash_hex} was taken by another transaction"
+                    ) from e
+
+                logger.info(f"DataEdge transaction 0x{tx_hash_hex} was already mined ({e})")
+
+            else:
+                raise
 
         logger.info(f"DataEdge payload sent with hash: 0x{tx_hash_hex}")
 
-        # Past the broadcast the transaction may be mined whatever happens next, so a failed receipt
-        # is an unknown outcome rather than a failed publish
+        # Past the broadcast the transaction may be mined whatever happens next, so not seeing it mined
+        # in time is an unknown outcome rather than a failed publish
         try:
-            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, self.tx_timeout_seconds)
+            receipt = w3.eth.wait_for_transaction_receipt(signed_tx.hash, self.tx_timeout_seconds)
 
-        except Exception as e:
+        except TimeExhausted as e:
             raise DataEdgePendingError(
                 f"DataEdge transaction broadcast but its outcome is unknown ({e}): {tx_url}", tx_url
             ) from e
+
+        # The provider itself failed, so the next one can resend the same transaction and confirm it
+        except Exception as e:
+            raise ReceiptUnavailableError(f"Could not confirm 0x{tx_hash_hex}: {e}") from e
 
         if receipt["status"] != 1:
             raise DataEdgeRevertedError(f"DataEdge transaction reverted: {tx_url}")
@@ -263,26 +283,59 @@ class DataEdgeClient:
         logger.info(f"Publishing {len(payload)} byte payload to DataEdge at {self.contract_address}")
 
         last_error: Optional[Exception] = None
+        signed_tx = None
+        sent_tx_url = None
 
-        # Try each provider in turn, since a single provider failing is the common case
+        # Sign once and send the same transaction through each provider in turn. A node turns away a
+        # repeat of a transaction it already has, so a send whose response was lost can be retried
+        # through the next provider without risking a second publish.
         for rpc_url in self.rpc_providers:
             try:
-                tx_hash = self._publish_via_provider(rpc_url, payload, private_key)
+                w3 = self._connect(rpc_url)
+                if signed_tx is None:
+                    signed_tx = self._sign_transaction(w3, payload, private_key)
+                    logger.info(f"Signed DataEdge transaction 0x{signed_tx.hash.hex().removeprefix('0x')}")
+
+                tx_hash = self._send_and_confirm(w3, signed_tx)
                 tx_url = f"{self.block_explorer_url}/tx/0x{tx_hash}"
                 logger.info(f"Published DataEdge payload: {tx_url}")
 
                 return tx_url
 
             # A revert is deterministic, so rotating would only pay for the same failure again, and a
-            # broadcast transaction may still be mined, so rotating would duplicate or underprice it
+            # transaction not yet seen mined may still be, so it is reported rather than failed
             except (DataEdgeRevertedError, DataEdgePendingError):
                 raise
+
+            except ReceiptUnavailableError as e:
+                logger.warning(f"Failed to confirm DataEdge payload via {rpc_url}: {e}")
+                last_error = e
+                sent_tx_url = f"{self.block_explorer_url}/tx/0x{signed_tx.hash.hex().removeprefix('0x')}"
+
+            # Nothing signed so far can be mined, so the next provider signs afresh with a current nonce
+            except NonceAlreadyUsedError as e:
+                logger.warning(f"Failed to publish DataEdge payload via {rpc_url}: {e}")
+                last_error = e
+                signed_tx = None
 
             except Exception as e:
                 logger.warning(f"Failed to publish DataEdge payload via {rpc_url}: {e}")
                 last_error = e
 
+        # A transaction that was sent may still be mined, so it is unresolved rather than failed
+        if sent_tx_url:
+            raise DataEdgePendingError(
+                f"DataEdge transaction was sent but no provider could confirm it ({last_error}): {sent_tx_url}",
+                sent_tx_url,
+            )
+
+        # A failed send may still have reached a node, so name the transaction for checking on chain
+        sent_as = ""
+        if signed_tx is not None:
+            tx_hash_hex = signed_tx.hash.hex().removeprefix("0x")
+            sent_as = f" If a send reached a node, it is {self.block_explorer_url}/tx/0x{tx_hash_hex}."
+
         raise RuntimeError(
-            f"Failed to publish DataEdge payload via all {len(self.rpc_providers)} RPC providers. "
+            f"Failed to publish DataEdge payload via all {len(self.rpc_providers)} RPC providers.{sent_as} "
             f"Last error: {last_error}"
         )

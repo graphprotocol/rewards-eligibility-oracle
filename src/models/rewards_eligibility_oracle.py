@@ -34,6 +34,10 @@ from src.utils.slack_notifier import create_slack_notifier
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Most days a run reaches back to cover days earlier runs failed to publish. Matches the scheduler's
+# limit on catching up missed runs, and keeps the payload far below a transaction's size limit.
+MAX_PUBLISH_CATCH_UP_DAYS = 7
+
 
 class RunProgress:
     """The stage an oracle run has reached, so a failure report can say where the run stopped."""
@@ -64,6 +68,7 @@ class PendingPublication:
 
 def publish_daily_metrics_to_data_edge(
     config: dict,
+    pipeline: EligibilityPipeline,
     daily_metrics_grid: pd.DataFrame,
     run_date: date,
     window_start: date,
@@ -81,6 +86,7 @@ def publish_daily_metrics_to_data_edge(
 
     Args:
         config: Flat configuration for the run
+        pipeline: Pipeline whose earlier manifests say which days have already been published
         daily_metrics_grid: Dense per-indexer, per-day metrics for the analysis window
         run_date: The date of the run
         window_start: First day of the analysis window
@@ -100,7 +106,7 @@ def publish_daily_metrics_to_data_edge(
         return None
 
     try:
-        publish_days = config["DATA_EDGE_PUBLISH_DAYS"]
+        publish_days = _count_days_to_publish(config, pipeline, run_date, window_end)
 
         # A day with no query attempts at all means its source data has not arrived, not that every
         # indexer was idle. Such a day is held back rather than published as zeros; the encoder omits
@@ -168,8 +174,8 @@ def publish_daily_metrics_to_data_edge(
 
         return None
 
-    # The run's artifacts stay on disk and its manifest records no transaction, so a later run serving
-    # the same artifacts retries the publish from them
+    # The manifest records no transaction, so a re-run serving the same artifacts retries the publish,
+    # and the next day's run reaches back over these days
     except Exception as e:
         logger.error(f"Failed to publish daily metrics to DataEdge: {e}", exc_info=True)
         send_opsgenie_alert_safe(
@@ -180,6 +186,26 @@ def publish_daily_metrics_to_data_edge(
         )
 
         return None
+
+
+def _count_days_to_publish(config, pipeline, run_date, window_end) -> int:
+    """
+    Count the trailing days to publish: every day since the last confirmed publish plus the configured
+    overlap, so days earlier runs failed to publish are covered, up to MAX_PUBLISH_CATCH_UP_DAYS.
+    """
+    configured_days = config["DATA_EDGE_PUBLISH_DAYS"]
+    last_published_day = pipeline.find_last_published_day(run_date, MAX_PUBLISH_CATCH_UP_DAYS)
+
+    # With no confirmed publish in reach, every day back to the cap may be missing from the chain
+    if last_published_day is None:
+        days_needed = MAX_PUBLISH_CATCH_UP_DAYS
+    else:
+        days_needed = min((window_end - last_published_day).days + configured_days - 1, MAX_PUBLISH_CATCH_UP_DAYS)
+
+    if days_needed > configured_days:
+        logger.info(f"Publishing {days_needed} days to cover days earlier runs did not publish")
+
+    return max(configured_days, days_needed)
 
 
 def main(run_date_override: date = None):
@@ -269,6 +295,7 @@ def main(run_date_override: date = None):
         if publication.grid is not None:
             published_tx = publish_daily_metrics_to_data_edge(
                 config=config,
+                pipeline=pipeline,
                 daily_metrics_grid=publication.grid,
                 run_date=current_run_date,
                 window_start=publication.window_start,
@@ -347,12 +374,14 @@ def _get_eligible_indexers(config, credentials, pipeline, current_run_date, star
             logger.info(
                 f"Loaded {len(eligible_indexers)} eligible indexers from cache - skipping BigQuery and processing"
             )
-            _queue_unpublished_cached_metrics(config, pipeline, current_run_date, publication)
 
-        except (FileNotFoundError, ValueError, KeyError) as cache_error:
+        except (FileNotFoundError, ValueError) as cache_error:
             logger.warning(f"Failed to load cached data: {cache_error}. Falling back to BigQuery.")
-            publication.grid = None
             force_refresh = True
+
+        # Kept out of the try above, so a problem with the publish artifacts never sends renewals to BigQuery
+        else:
+            _queue_unpublished_cached_metrics(config, pipeline, current_run_date, publication)
 
     if force_refresh or not pipeline.has_fresh_processed_data(current_run_date, cache_max_age_minutes):
         reason = "forced refresh" if force_refresh else "no fresh cached data available"
@@ -367,23 +396,46 @@ def _queue_unpublished_cached_metrics(config, pipeline, current_run_date, public
     """
     Queue a cached run's metrics for publishing when the run that wrote them never completed it.
 
-    Without this a failed publish could never be retried: the natural recovery, re-running the service,
-    takes the cached path, and the days the next run's overlap does not cover would be lost for good.
-    The manifest describes the artifacts, so it, rather than this run's config, says what to publish.
+    Re-running the service after a failure takes the cached path, so this is what publishes them the
+    same day. The manifest, rather than this run's config, says what to publish.
     """
     if not config.get("DATA_EDGE_CONTRACT_ADDRESS"):
         return
 
-    cached_metadata = pipeline.load_run_metadata(current_run_date)
-    if cached_metadata.get("published_tx"):
+    # Read everything before queueing anything, so a half-read manifest never reaches the publish step
+    try:
+        cached_metadata = pipeline.load_run_metadata(current_run_date)
+        if cached_metadata.get("published_tx"):
+            return
+
+        grid = pipeline.load_daily_metrics_from_csv(current_run_date)
+        window_start = date.fromisoformat(cached_metadata["window_start"])
+        window_end = date.fromisoformat(cached_metadata["window_end"])
+        criteria = cached_metadata["criteria"]
+        indexers_evaluated = cached_metadata["indexers_evaluated"]
+
+    # Publishing is best-effort and the renewals can still run from the cached list, so an unreadable
+    # artifact skips the retry and alerts rather than failing the run or forcing a BigQuery re-query
+    except Exception as e:
+        logger.error(f"Could not retry publishing cached metrics for {current_run_date}: {e}", exc_info=True)
+        send_opsgenie_alert_safe(
+            api_key=config.get("OPSGENIE_API_KEY"),
+            message="Rewards Oracle: DataEdge publish retry skipped",
+            description=(
+                f"Eligibility renewal was unaffected. The cached metrics for {current_run_date} are unpublished "
+                f"and could not be read back to retry: {e}"
+            ),
+            priority="P4",
+        )
+
         return
 
     logger.info(f"Cached metrics for {current_run_date} are unpublished - retrying publish")
-    publication.grid = pipeline.load_daily_metrics_from_csv(current_run_date)
-    publication.window_start = date.fromisoformat(cached_metadata["window_start"])
-    publication.window_end = date.fromisoformat(cached_metadata["window_end"])
-    publication.criteria = cached_metadata["criteria"]
-    publication.indexers_evaluated = cached_metadata["indexers_evaluated"]
+    publication.grid = grid
+    publication.window_start = window_start
+    publication.window_end = window_end
+    publication.criteria = criteria
+    publication.indexers_evaluated = indexers_evaluated
 
 
 def _fetch_and_process_eligibility_data(
@@ -429,21 +481,39 @@ def _fetch_and_process_eligibility_data(
         "MAX_LATENCY_MS": config["MAX_LATENCY_MS"],
         "MAX_BLOCKS_BEHIND": config["MAX_BLOCKS_BEHIND"],
     }
-    publication.grid = pipeline.write_daily_metrics(
-        daily_metrics=daily_metrics,
-        current_date=current_run_date,
-        window_start=start_date,
-        window_end=end_date,
-    )
-    pipeline.write_run_metadata(
-        current_date=current_run_date,
-        window_start=start_date,
-        window_end=end_date,
-        criteria=criteria,
-        source="bigquery",
-        indexers_evaluated=len(eligibility_data),
-        indexers_eligible=len(eligible_indexers),
-    )
+    # Only the publish needs these, so failing to save them skips it rather than stopping the renewals
+    try:
+        grid = pipeline.write_daily_metrics(
+            daily_metrics=daily_metrics,
+            current_date=current_run_date,
+            window_start=start_date,
+            window_end=end_date,
+        )
+        pipeline.write_run_metadata(
+            current_date=current_run_date,
+            window_start=start_date,
+            window_end=end_date,
+            criteria=criteria,
+            source="bigquery",
+            indexers_evaluated=len(eligibility_data),
+            indexers_eligible=len(eligible_indexers),
+        )
+
+    except Exception as e:
+        logger.error(f"Could not save the daily metrics for {current_run_date}: {e}", exc_info=True)
+        send_opsgenie_alert_safe(
+            api_key=config.get("OPSGENIE_API_KEY"),
+            message="Rewards Oracle: daily metrics not saved",
+            description=(
+                f"Eligibility renewal still runs. The daily metrics for {current_run_date} could not be "
+                f"saved, so they were not published: {e}"
+            ),
+            priority="P4",
+        )
+
+        return eligible_indexers
+
+    publication.grid = grid
     publication.window_start = start_date
     publication.window_end = end_date
     publication.criteria = criteria

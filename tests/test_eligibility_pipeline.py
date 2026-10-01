@@ -695,3 +695,60 @@ def test_has_existing_processed_data_requires_the_per_day_artifacts(
 
     # Assert
     assert pipeline.has_existing_processed_data(current_date_val) is True
+
+
+def _write_manifest(pipeline: EligibilityPipeline, run_date: date, published_tx=None) -> None:
+    """Write a run's manifest, recording a confirmed publish when published_tx is given."""
+    pipeline.write_run_metadata(
+        current_date=run_date,
+        window_start=run_date - timedelta(days=28),
+        window_end=run_date,
+        criteria={"MIN_ONLINE_DAYS": 5},
+        source="bigquery",
+        indexers_evaluated=2,
+        indexers_eligible=1,
+    )
+    if published_tx:
+        pipeline.record_published_transaction(run_date, published_tx)
+
+
+def test_find_last_published_day_skips_runs_that_did_not_publish(pipeline: EligibilityPipeline):
+    """
+    Tests that the most recent run whose publish was confirmed is found, passing over a later run
+    whose publish failed and a day with no run at all.
+    """
+    # Arrange: published 4 days ago, failed 2 days ago, no run yesterday or 3 days ago
+    run_date = date(2025, 1, 10)
+    _write_manifest(pipeline, run_date - timedelta(days=5), "https://arbiscan.io/tx/0xolder")
+    _write_manifest(pipeline, run_date - timedelta(days=4), "https://arbiscan.io/tx/0xlatest")
+    _write_manifest(pipeline, run_date - timedelta(days=2))
+
+    # Act & Assert
+    assert pipeline.find_last_published_day(run_date, lookback_days=7) == run_date - timedelta(days=4)
+
+
+def test_find_last_published_day_ignores_the_run_itself_and_runs_past_the_lookback(pipeline: EligibilityPipeline):
+    """
+    Tests that only earlier runs within the lookback count, so a run never treats its own publish as
+    already done and an old publish does not stretch the payload past its limit.
+    """
+    # Arrange
+    run_date = date(2025, 1, 10)
+    _write_manifest(pipeline, run_date, "https://arbiscan.io/tx/0xtoday")
+    _write_manifest(pipeline, run_date - timedelta(days=8), "https://arbiscan.io/tx/0xold")
+
+    # Act & Assert
+    assert pipeline.find_last_published_day(run_date, lookback_days=7) is None
+
+
+def test_find_last_published_day_passes_over_an_unreadable_manifest(pipeline: EligibilityPipeline):
+    """Tests that a corrupt manifest counts as a run that did not publish, rather than failing the publish."""
+    # Arrange
+    run_date = date(2025, 1, 10)
+    _write_manifest(pipeline, run_date - timedelta(days=3), "https://arbiscan.io/tx/0xabc")
+    corrupt_dir = pipeline.get_date_output_directory(run_date - timedelta(days=1))
+    corrupt_dir.mkdir(parents=True)
+    (corrupt_dir / "run_metadata.json").write_text("{not json")
+
+    # Act & Assert
+    assert pipeline.find_last_published_day(run_date, lookback_days=7) == run_date - timedelta(days=3)

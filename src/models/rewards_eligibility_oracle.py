@@ -108,8 +108,8 @@ def publish_daily_metrics_to_data_edge(
             day.isoformat() for day in select_days_to_publish(window_start, window_end, publish_days)
         ]
         published_rows = daily_metrics_grid[daily_metrics_grid["day"].isin(days_to_publish)]
-        if not (published_rows["query_attempts"] > 0).any():
-            logger.warning(f"Skipping DataEdge publishing: no query attempts recorded for {days_to_publish}")
+        attempts_by_day = published_rows.groupby("day")["query_attempts"].sum()
+        if any(attempts_by_day.get(day, 0) <= 0 for day in days_to_publish):
             send_opsgenie_alert_safe(
                 api_key=config.get("OPSGENIE_API_KEY"),
                 message="Rewards Oracle: DataEdge publishing skipped",

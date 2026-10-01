@@ -455,21 +455,39 @@ def _fetch_and_process_eligibility_data(
         "MAX_LATENCY_MS": config["MAX_LATENCY_MS"],
         "MAX_BLOCKS_BEHIND": config["MAX_BLOCKS_BEHIND"],
     }
-    publication.grid = pipeline.write_daily_metrics(
-        daily_metrics=daily_metrics,
-        current_date=current_run_date,
-        window_start=start_date,
-        window_end=end_date,
-    )
-    pipeline.write_run_metadata(
-        current_date=current_run_date,
-        window_start=start_date,
-        window_end=end_date,
-        criteria=criteria,
-        source="bigquery",
-        indexers_evaluated=len(eligibility_data),
-        indexers_eligible=len(eligible_indexers),
-    )
+    # Only the publish needs these, so failing to save them skips it rather than stopping the renewals
+    try:
+        grid = pipeline.write_daily_metrics(
+            daily_metrics=daily_metrics,
+            current_date=current_run_date,
+            window_start=start_date,
+            window_end=end_date,
+        )
+        pipeline.write_run_metadata(
+            current_date=current_run_date,
+            window_start=start_date,
+            window_end=end_date,
+            criteria=criteria,
+            source="bigquery",
+            indexers_evaluated=len(eligibility_data),
+            indexers_eligible=len(eligible_indexers),
+        )
+
+    except Exception as e:
+        logger.error(f"Could not save the daily metrics for {current_run_date}: {e}", exc_info=True)
+        send_opsgenie_alert_safe(
+            api_key=config.get("OPSGENIE_API_KEY"),
+            message="Rewards Oracle: daily metrics not saved",
+            description=(
+                f"Eligibility renewal still runs. The daily metrics for {current_run_date} could not be "
+                f"saved, so they were not published: {e}"
+            ),
+            priority="P4",
+        )
+
+        return eligible_indexers
+
+    publication.grid = grid
     publication.window_start = start_date
     publication.window_end = end_date
     publication.criteria = criteria

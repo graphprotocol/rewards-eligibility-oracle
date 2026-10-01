@@ -579,6 +579,31 @@ def test_main_renews_from_cache_when_the_publish_artifacts_cannot_be_read(oracle
     assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: DataEdge publish retry skipped"
 
 
+@pytest.mark.parametrize("failing_step", ["write_daily_metrics", "write_run_metadata"])
+def test_main_renews_when_the_daily_metrics_cannot_be_saved(oracle_context, failing_step):
+    """
+    Test that a failure saving the per-day metrics, which only the publish needs, skips the publish
+    rather than failing the run before any eligibility is renewed.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    getattr(ctx["pipeline"], failing_step).side_effect = TypeError(
+        "'<' not supported between instances of 'str' and 'NoneType'"
+    )
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    # Renewals go ahead and the run still succeeds
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
+    ctx["circuit_breaker"].record_failure.assert_not_called()
+    ctx["slack"]["notifier"].send_success_notification.assert_called_once()
+
+    # Nothing is published from artifacts that were not saved, and the skip is alerted on
+    ctx["data_edge"].post_payload.assert_not_called()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: daily metrics not saved"
+
+
 def test_main_does_not_record_an_unconfirmed_publish(oracle_context):
     """
     Test that a publish whose outcome is unknown is not recorded as done, so a later run retries it.

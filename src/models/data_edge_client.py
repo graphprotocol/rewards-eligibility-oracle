@@ -13,7 +13,7 @@ import logging
 from typing import Any, List, Optional
 
 from web3 import Web3
-from web3.exceptions import ContractLogicError
+from web3.exceptions import ContractLogicError, TransactionNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +27,12 @@ FALLBACK_GAS_PER_CALLDATA_BYTE = 16
 FALLBACK_GAS_PER_LOG_BYTE = 8
 FALLBACK_GAS_OVERHEAD = 100_000
 
-# How nodes reject a transaction they already hold, or whose nonce is already mined. Either means an
-# earlier send of the same signed transaction got through, so it is waited on rather than failed.
-ALREADY_SENT_MESSAGES = ("already known", "known transaction", "already imported", "nonce too low")
+# How nodes reject a transaction they already hold, which means an earlier send of the same signed
+# transaction got through, so it is waited on rather than failed
+ALREADY_SENT_MESSAGES = ("already known", "known transaction", "already imported")
+
+# How nodes reject a transaction whose nonce is already used, whether by this transaction or another
+NONCE_USED_MESSAGE = "nonce too low"
 
 
 class DataEdgeRevertedError(Exception):
@@ -52,6 +55,10 @@ class DataEdgePendingError(Exception):
     def __init__(self, message: str, tx_url: str):
         super().__init__(message)
         self.tx_url = tx_url
+
+
+class NonceAlreadyUsedError(Exception):
+    """Raised when another transaction has taken the nonce a publish was signed with, so it can never be mined."""
 
 
 def _was_already_sent(error: Exception) -> bool:
@@ -213,10 +220,24 @@ class DataEdgeClient:
             w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
         except Exception as e:
-            if not _was_already_sent(e):
-                raise
+            if _was_already_sent(e):
+                logger.info(f"DataEdge transaction 0x{tx_hash_hex} was already sent ({e})")
 
-            logger.info(f"DataEdge transaction 0x{tx_hash_hex} was already sent ({e})")
+            # A used nonce is this transaction's own only if the node has it. Otherwise another transaction
+            # took it, as when the nonce was read from a node that was behind, and this one can never be mined.
+            elif NONCE_USED_MESSAGE in str(e).lower():
+                try:
+                    w3.eth.get_transaction(signed_tx.hash)
+
+                except TransactionNotFound:
+                    raise NonceAlreadyUsedError(
+                        f"Nonce of 0x{tx_hash_hex} was taken by another transaction"
+                    ) from e
+
+                logger.info(f"DataEdge transaction 0x{tx_hash_hex} was already mined ({e})")
+
+            else:
+                raise
 
         logger.info(f"DataEdge payload sent with hash: 0x{tx_hash_hex}")
 
@@ -275,6 +296,12 @@ class DataEdgeClient:
             # transaction not yet seen mined may still be, so it is reported rather than failed
             except (DataEdgeRevertedError, DataEdgePendingError):
                 raise
+
+            # Nothing signed so far can be mined, so the next provider signs afresh with a current nonce
+            except NonceAlreadyUsedError as e:
+                logger.warning(f"Failed to publish DataEdge payload via {rpc_url}: {e}")
+                last_error = e
+                signed_tx = None
 
             except Exception as e:
                 logger.warning(f"Failed to publish DataEdge payload via {rpc_url}: {e}")

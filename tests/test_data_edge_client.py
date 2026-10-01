@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from web3.exceptions import ContractLogicError, RequestTimedOut, Web3RPCError
+from web3.exceptions import ContractLogicError, RequestTimedOut, TransactionNotFound, Web3RPCError
 
 from src.models.data_edge_client import (
     FALLBACK_GAS_OVERHEAD,
@@ -262,10 +262,9 @@ class TestPostPayload:
         "send_error",
         [
             _rpc_error(-32000, "already known"),
-            _rpc_error(-32000, "nonce too low"),
             _rpc_error(-32010, "Transaction with the same hash was already imported."),
         ],
-        ids=["already_known", "nonce_too_low", "already_imported"],
+        ids=["already_known", "already_imported"],
     )
     def test_post_payload_waits_for_a_transaction_the_node_already_has(
         self, client: DataEdgeClient, mock_web3: MagicMock, send_error: Exception
@@ -287,6 +286,51 @@ class TestPostPayload:
         signed_tx = w3.eth.account.sign_transaction.return_value
         assert w3.eth.wait_for_transaction_receipt.call_args.args[0] == signed_tx.hash
         mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    def test_post_payload_waits_when_the_used_nonce_is_its_own(self, client: DataEdgeClient, mock_web3: MagicMock):
+        """
+        Tests that a "nonce too low" answer is treated as sent when the node has the transaction, which is
+        what an earlier send that got through and was mined looks like.
+        """
+        # Arrange: the node rejects the nonce but knows the transaction
+        w3 = _build_web3()
+        w3.eth.send_raw_transaction.side_effect = _rpc_error(-32000, "nonce too low")
+        mock_web3.return_value = w3
+
+        # Act
+        tx_url = client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert
+        assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+        w3.eth.get_transaction.assert_called_once()
+        mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    def test_post_payload_signs_again_when_another_transaction_took_the_nonce(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a "nonce too low" answer for a transaction the node has never seen leads to a fresh
+        signature on the next provider. Another transaction took the nonce, as happens when it was read
+        from a node that was behind, so the first transaction can never be mined and cannot publish twice.
+        """
+        # Arrange
+        stale = _build_web3()
+        stale.eth.send_raw_transaction.side_effect = _rpc_error(-32000, "nonce too low")
+        stale.eth.get_transaction.side_effect = TransactionNotFound("not found")
+        healthy = _build_web3()
+        mock_web3.side_effect = [stale, healthy]
+
+        # Act
+        tx_url = client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert: the backup signed and sent its own transaction
+        assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+        healthy.eth.account.sign_transaction.assert_called_once()
+        healthy.eth.send_raw_transaction.assert_called_once_with(
+            healthy.eth.account.sign_transaction.return_value.raw_transaction
+        )
 
 
     def test_post_payload_fails_when_no_provider_accepts_the_transaction(

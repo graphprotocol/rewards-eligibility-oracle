@@ -347,12 +347,14 @@ def _get_eligible_indexers(config, credentials, pipeline, current_run_date, star
             logger.info(
                 f"Loaded {len(eligible_indexers)} eligible indexers from cache - skipping BigQuery and processing"
             )
-            _queue_unpublished_cached_metrics(config, pipeline, current_run_date, publication)
 
-        except (FileNotFoundError, ValueError, KeyError) as cache_error:
+        except (FileNotFoundError, ValueError) as cache_error:
             logger.warning(f"Failed to load cached data: {cache_error}. Falling back to BigQuery.")
-            publication.grid = None
             force_refresh = True
+
+        # Kept out of the try above, so a problem with the publish artifacts never sends renewals to BigQuery
+        else:
+            _queue_unpublished_cached_metrics(config, pipeline, current_run_date, publication)
 
     if force_refresh or not pipeline.has_fresh_processed_data(current_run_date, cache_max_age_minutes):
         reason = "forced refresh" if force_refresh else "no fresh cached data available"
@@ -374,16 +376,40 @@ def _queue_unpublished_cached_metrics(config, pipeline, current_run_date, public
     if not config.get("DATA_EDGE_CONTRACT_ADDRESS"):
         return
 
-    cached_metadata = pipeline.load_run_metadata(current_run_date)
-    if cached_metadata.get("published_tx"):
+    # Read everything before queueing anything, so a half-read manifest never reaches the publish step
+    try:
+        cached_metadata = pipeline.load_run_metadata(current_run_date)
+        if cached_metadata.get("published_tx"):
+            return
+
+        grid = pipeline.load_daily_metrics_from_csv(current_run_date)
+        window_start = date.fromisoformat(cached_metadata["window_start"])
+        window_end = date.fromisoformat(cached_metadata["window_end"])
+        criteria = cached_metadata["criteria"]
+        indexers_evaluated = cached_metadata["indexers_evaluated"]
+
+    # Publishing is best-effort and the renewals can still run from the cached list, so an unreadable
+    # artifact skips the retry and alerts rather than failing the run or forcing a BigQuery re-query
+    except Exception as e:
+        logger.error(f"Could not retry publishing cached metrics for {current_run_date}: {e}", exc_info=True)
+        send_opsgenie_alert_safe(
+            api_key=config.get("OPSGENIE_API_KEY"),
+            message="Rewards Oracle: DataEdge publish retry skipped",
+            description=(
+                f"Eligibility renewal was unaffected. The cached metrics for {current_run_date} are unpublished "
+                f"and could not be read back to retry: {e}"
+            ),
+            priority="P4",
+        )
+
         return
 
     logger.info(f"Cached metrics for {current_run_date} are unpublished - retrying publish")
-    publication.grid = pipeline.load_daily_metrics_from_csv(current_run_date)
-    publication.window_start = date.fromisoformat(cached_metadata["window_start"])
-    publication.window_end = date.fromisoformat(cached_metadata["window_end"])
-    publication.criteria = cached_metadata["criteria"]
-    publication.indexers_evaluated = cached_metadata["indexers_evaluated"]
+    publication.grid = grid
+    publication.window_start = window_start
+    publication.window_end = window_end
+    publication.criteria = criteria
+    publication.indexers_evaluated = indexers_evaluated
 
 
 def _fetch_and_process_eligibility_data(

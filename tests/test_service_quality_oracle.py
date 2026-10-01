@@ -539,6 +539,46 @@ def test_main_publishes_a_cached_run_under_the_criteria_that_produced_it(oracle_
     assert mock_encode.call_args.kwargs["indexers_evaluated"] == 42
 
 
+@pytest.mark.parametrize(
+    "unreadable_artifact",
+    ["missing_manifest", "malformed_grid", "incomplete_manifest"],
+)
+def test_main_renews_from_cache_when_the_publish_artifacts_cannot_be_read(oracle_context, unreadable_artifact):
+    """
+    Test that a cached run whose publish artifacts cannot be read still renews from the cached list,
+    skipping only the publish retry. Publishing is best-effort, so it must not force a BigQuery re-query
+    that could fail the renewals.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["pipeline"].has_fresh_processed_data.return_value = True
+    ctx["pipeline"].load_eligible_indexers_from_csv.return_value = ["0xCachedEligible"]
+    unpublished_metadata = {**MOCK_PUBLISHED_RUN_METADATA, "published_tx": None}
+
+    if unreadable_artifact == "missing_manifest":
+        ctx["pipeline"].load_run_metadata.side_effect = FileNotFoundError("Run metadata not found")
+    elif unreadable_artifact == "malformed_grid":
+        ctx["pipeline"].load_run_metadata.return_value = unpublished_metadata
+        ctx["pipeline"].load_daily_metrics_from_csv.side_effect = ValueError("Error reading daily metrics")
+    else:
+        ctx["pipeline"].load_run_metadata.return_value = {
+            key: value for key, value in unpublished_metadata.items() if key != "criteria"
+        }
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    # Renewals go ahead from the cache, without touching BigQuery
+    ctx["bq_provider_cls"].assert_not_called()
+    assert ctx["client"].batch_renew_indexer_rewards_eligibility.call_args.kwargs["indexer_addresses"] == [
+        "0xCachedEligible"
+    ]
+
+    # Nothing half-read is published, and the skipped retry is alerted on
+    ctx["data_edge"].post_payload.assert_not_called()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: DataEdge publish retry skipped"
+
+
 def test_main_does_not_record_an_unconfirmed_publish(oracle_context):
     """
     Test that a publish whose outcome is unknown is not recorded as done, so a later run retries it.

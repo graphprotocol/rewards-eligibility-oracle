@@ -99,7 +99,8 @@ class BigQueryProvider:
 
         return f"""
         WITH
-        -- Get daily query metrics per indexer, counting each quality bar breached
+        -- Get daily query metrics per indexer, counting each quality bar breached. A latency or
+        -- blocks-behind value that was never recorded is not counted as breaching its bar.
         DailyMetrics AS (
             SELECT
                 day_partition AS day,
@@ -108,8 +109,8 @@ class BigQueryProvider:
                 SUM(CASE WHEN {is_qualifying_query} THEN 1 ELSE 0 END) AS qualifying_queries,
                 COUNT(DISTINCT CASE WHEN {is_qualifying_query} THEN deployment END) AS qualifying_subgraphs,
                 SUM(CASE WHEN status = '200 OK' THEN 0 ELSE 1 END) AS failed_status,
-                SUM(CASE WHEN response_time_ms < {self.max_latency_ms} THEN 0 ELSE 1 END) AS failed_latency,
-                SUM(CASE WHEN blocks_behind < {self.max_blocks_behind} THEN 0 ELSE 1 END)
+                SUM(CASE WHEN response_time_ms >= {self.max_latency_ms} THEN 1 ELSE 0 END) AS failed_latency,
+                SUM(CASE WHEN blocks_behind >= {self.max_blocks_behind} THEN 1 ELSE 0 END)
                     AS failed_blocks_behind
             FROM
                 {self.table_name}

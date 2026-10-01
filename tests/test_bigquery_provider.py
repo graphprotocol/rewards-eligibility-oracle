@@ -265,6 +265,41 @@ class TestGetIndexerDailyMetricsQuery:
         assert result.loc["0xmixed", "failed_blocks_behind"] == 1
 
 
+    def test_get_indexer_daily_metrics_query_does_not_blame_a_missing_measurement(self, mock_bpd: MagicMock):
+        """
+        Runs the query on an in-memory SQLite table to check that a response with no recorded latency or
+        blocks behind, as an errored request can have, is not counted as too slow or too far behind.
+        """
+        provider = BigQueryProvider(
+            project=MOCK_PROJECT,
+            location=MOCK_LOCATION,
+            table_name="query_logs",
+            min_online_days=1,
+            min_subgraphs=1,
+            max_latency_ms=MOCK_MAX_LATENCY_MS,
+            max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
+        )
+        day = START_DATE.strftime("%Y-%m-%d")
+        rows = [(day, "0xerrored", "sg0", "500 Internal Server Error", None, None)]
+
+        # Run the generated query against the rows
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            "CREATE TABLE query_logs (day_partition TEXT, indexer TEXT, deployment TEXT, status TEXT, "
+            "response_time_ms INTEGER, blocks_behind INTEGER)"
+        )
+        connection.executemany("INSERT INTO query_logs VALUES (?, ?, ?, ?, ?, ?)", rows)
+        query = provider._get_indexer_daily_metrics_query(start_date=START_DATE, end_date=START_DATE)
+        result = pd.read_sql_query(query, connection).set_index("indexer")
+        connection.close()
+
+        # Only the bar the response is known to have breached is counted, and it still does not qualify
+        assert result.loc["0xerrored", "failed_status"] == 1
+        assert result.loc["0xerrored", "failed_latency"] == 0
+        assert result.loc["0xerrored", "failed_blocks_behind"] == 0
+        assert result.loc["0xerrored", "qualifying_queries"] == 0
+
+
     def test_get_indexer_daily_metrics_query_handles_single_day_range(self, provider: BigQueryProvider):
         """
         Tests that the query is constructed correctly when start and end dates are the same,

@@ -11,7 +11,7 @@ import json
 import logging
 import shutil
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -348,6 +348,28 @@ class EligibilityPipeline:
         # The publish itself succeeded, so a manifest that cannot be updated must not fail the run
         except Exception as e:
             logger.error(f"Failed to record the published metrics transaction: {e}", exc_info=True)
+
+
+    def find_last_published_day(self, current_date: date, lookback_days: int) -> Optional[date]:
+        """
+        Find the run date of the latest confirmed publish in the lookback_days before current_date.
+
+        A run's window ends on its run date, so this is also the last day that publish covered.
+        """
+        for offset in range(1, lookback_days + 1):
+            run_date = current_date - timedelta(days=offset)
+
+            # A missing or corrupt manifest means that day's run did not publish anything usable
+            try:
+                metadata = self.load_run_metadata(run_date)
+
+            except (FileNotFoundError, ValueError):
+                continue
+
+            if metadata.get("published_tx"):
+                return run_date
+
+        return None
 
 
     def clean_old_date_directories(self, max_age_before_deletion: int) -> None:

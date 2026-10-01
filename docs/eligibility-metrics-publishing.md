@@ -233,6 +233,12 @@ Publishing an overlap means the next run restates it. The same overlap covers a 
 failed, and a day whose source data arrived late in BigQuery. Rows are keyed by `(indexer, day)` so
 restatement is an upsert.
 
+**Reaching back over failed publishes.** A run whose publish fails still succeeds, so nothing re-runs
+it. Each run therefore widens its trailing days back to the last run whose manifest records a
+confirmed publish, up to 7 days (`MAX_PUBLISH_CATCH_UP_DAYS`, the scheduler's own limit on catching
+up missed runs). With no confirmed publish in the last 7 days, it publishes all 7, around 42 KB at
+200 indexers.
+
 Measured payload sizes, 200 indexers with a full set of counters:
 
 | Encoding | Per run |
@@ -318,9 +324,9 @@ Three properties worth keeping if the format is revised:
   BigQuery data can all restate a day.
 - **A cache hit retries an unfinished publish, and only that.** The manifest records `published_tx`
   once a publish is confirmed, so a re-run inside the 30-minute cache window republishes nothing when
-  the artifacts already reached the chain, and publishes them from disk when they did not. Without
-  this a failed publish could never be retried: the natural recovery, re-running the service, takes
-  the cached path, and the day the next run's overlap does not cover would be lost for good. A retry
+  the artifacts already reached the chain, and publishes them from disk when they did not. Re-running
+  the service after a failure takes the cached path, so this is what publishes them the same day
+  rather than leaving them for the next day's run to reach back over. A retry
   publishes under the window and criteria in the manifest, not the current config, since those are
   what produced the grid.
 - **Only a confirmed publish is recorded.** One that was broadcast without its outcome established

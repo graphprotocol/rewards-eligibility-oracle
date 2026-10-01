@@ -30,6 +30,11 @@ FALLBACK_GAS_PER_CALLDATA_BYTE = 16
 FALLBACK_GAS_PER_LOG_BYTE = 8
 FALLBACK_GAS_OVERHEAD = 100_000
 
+# How a node's JSON-RPC error says a request was rate limited. There is no single standard code, so
+# the wording providers use is matched as well.
+RATE_LIMIT_RPC_CODES = {-32005, 429}
+RATE_LIMIT_RPC_MESSAGES = ("rate limit", "too many requests")
+
 
 class DataEdgeRevertedError(Exception):
     """
@@ -62,9 +67,14 @@ def _broadcast_was_refused(error: Exception) -> bool:
     A refusal leaves nothing in flight, so another provider can safely be tried. Anything else, such as
     a timeout or a connection dropped mid-request, may have reached the node before the response was lost.
     """
-    # The node answered with an error, so it saw the transaction and did not take it
+    # Of the errors a node can answer with, only a rate limit clearly means it never handled the
+    # transaction. Others, such as a node-side timeout or "already known", can follow it being accepted.
     if isinstance(error, Web3RPCError):
-        return True
+        rpc_error = (error.rpc_response or {}).get("error")
+        code = rpc_error.get("code") if isinstance(rpc_error, dict) else None
+        message = str(error).lower()
+
+        return code in RATE_LIMIT_RPC_CODES or any(text in message for text in RATE_LIMIT_RPC_MESSAGES)
 
     # The provider rejected the request itself, as with a 429 rate limit, before any node handled it
     if isinstance(error, requests.exceptions.HTTPError) and error.response is not None:

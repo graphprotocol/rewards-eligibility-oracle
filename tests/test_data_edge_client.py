@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 from urllib3.exceptions import MaxRetryError, NewConnectionError
-from web3.exceptions import ContractLogicError, TransactionNotFound, Web3RPCError
+from web3.exceptions import ContractLogicError, RequestTimedOut, TransactionNotFound, Web3RPCError
 
 from src.models.data_edge_client import (
     FALLBACK_GAS_OVERHEAD,
@@ -64,6 +64,13 @@ def _http_error(status_code: int) -> requests.exceptions.HTTPError:
     response.status_code = status_code
 
     return requests.exceptions.HTTPError(f"{status_code} error", response=response)
+
+
+def _rpc_error(code: int, message: str) -> Web3RPCError:
+    """Build the error web3 raises when a node answers with a JSON-RPC error, as web3 itself does."""
+    error = {"code": code, "message": message}
+
+    return Web3RPCError(repr(error), rpc_response={"jsonrpc": "2.0", "id": 1, "error": error})
 
 
 @pytest.fixture
@@ -267,8 +274,10 @@ class TestPostPayload:
             Exception("connection reset"),
             requests.exceptions.ReadTimeout("read timed out"),
             _http_error(504),
+            RequestTimedOut("request timed out"),
+            _rpc_error(-32000, "already known"),
         ],
-        ids=["unknown", "read_timeout", "gateway_timeout"],
+        ids=["unknown", "read_timeout", "gateway_timeout", "node_timeout", "already_known"],
     )
     def test_post_payload_assumes_an_unanswerable_lookup_was_accepted(
         self, client: DataEdgeClient, mock_web3: MagicMock, send_error: Exception
@@ -294,13 +303,20 @@ class TestPostPayload:
         "send_error",
         [
             _http_error(429),
-            Web3RPCError("nonce too low"),
+            _rpc_error(-32005, "limit exceeded"),
+            _rpc_error(-32000, "Too Many Requests"),
             requests.exceptions.ConnectTimeout("connect timed out"),
             requests.exceptions.ConnectionError(
                 MaxRetryError(None, "/", reason=NewConnectionError(None, "connection refused"))
             ),
         ],
-        ids=["rate_limited", "rpc_error", "connect_timeout", "connection_refused"],
+        ids=[
+            "http_rate_limit",
+            "rpc_rate_limit_code",
+            "rpc_rate_limit_message",
+            "connect_timeout",
+            "connection_refused",
+        ],
     )
     def test_post_payload_rotates_when_a_refused_broadcast_cannot_be_looked_up(
         self, client: DataEdgeClient, mock_web3: MagicMock, send_error: Exception

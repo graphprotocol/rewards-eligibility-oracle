@@ -35,6 +35,9 @@ data:
     ]
     BLOCK_EXPLORER_URL = "https://sepolia.arbiscan.io"
     TX_TIMEOUT_SECONDS = "30"
+    # Publishing per-day metrics stays disabled until a DataEdge contract is deployed for this network
+    DATA_EDGE_CONTRACT_ADDRESS = ""
+    DATA_EDGE_PUBLISH_DAYS = "2"
 
     [scheduling]
     SCHEDULED_RUN_TIME = "10:00"

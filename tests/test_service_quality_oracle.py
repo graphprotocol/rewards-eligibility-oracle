@@ -4,12 +4,14 @@ Unit tests for the main RewardsEligibilityOracle orchestrator.
 
 import importlib
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+
+from src.models.data_edge_client import DataEdgePendingError
 
 MOCK_CONFIG = {
     "SLACK_WEBHOOK_URL": "http://fake.slack.com",
@@ -28,6 +30,7 @@ MOCK_CONFIG = {
     "BLOCKCHAIN_RPC_URLS": ["http://fake-rpc.com"],
     "BLOCKCHAIN_CONTRACT_ADDRESS": "0x1234",
     "BLOCK_EXPLORER_URL": "http://etherscan.io",
+    "DATA_EDGE_PUBLISH_DAYS": 2,
     "TX_TIMEOUT_SECONDS": 180,
     "PRIVATE_KEY": "0xfakekey",
     "BLOCKCHAIN_CHAIN_ID": 1,
@@ -40,6 +43,49 @@ MOCK_CONFIG = {
     "ARBITRUM_API_KEY": "fake-arbitrum-key",
 }
 
+# A DataEdge deployment to publish per-day metrics to. Absent from MOCK_CONFIG so that publishing
+# stays off unless a test opts into it.
+MOCK_DATA_EDGE_ADDRESS = "0x62c2305739cc75f19a3a6d52387ceb3690d99a99"
+
+# The window a cached run covered, which ends on the day its grid carries
+MOCK_CACHED_WINDOW_START = date.today() - timedelta(days=MOCK_CONFIG["BIGQUERY_ANALYSIS_PERIOD_DAYS"])
+
+# The manifest of a cached run whose metrics already reached the chain
+MOCK_PUBLISHED_RUN_METADATA = {
+    "run_date": date.today().isoformat(),
+    "window_start": MOCK_CACHED_WINDOW_START.isoformat(),
+    "window_end": date.today().isoformat(),
+    "criteria": {"MIN_ONLINE_DAYS": 5, "MIN_SUBGRAPHS": 1, "MAX_LATENCY_MS": 5000, "MAX_BLOCKS_BEHIND": 50000},
+    "source": "bigquery",
+    "indexers_evaluated": 42,
+    "indexers_eligible": 1,
+    "published_tx": "https://arbiscan.io/tx/0xalready",
+    "published_days": [date.today().isoformat()],
+}
+
+# Stands in for the grid the pipeline returns, which the oracle publishes without rebuilding it. Dated
+# today, the final day of the default run's window, since days with no activity are not published.
+MOCK_DAILY_METRICS_GRID = pd.DataFrame(
+    {
+        "day": [date.today().isoformat()],
+        "indexer": ["0x32bbd16a94ebb289edceebe77f35acc82664157b"],
+        "query_attempts": [10],
+        "qualifying_queries": [8],
+        "qualifying_subgraphs": [2],
+        "failed_status": [1],
+        "failed_latency": [1],
+        "failed_blocks_behind": [0],
+        "is_online_day": [1],
+    }
+)
+
+
+def reo_module():
+    """Import the oracle module directly, for unit-testing helpers that need no patched dependencies."""
+    import src.models.rewards_eligibility_oracle as reo
+
+    return reo
+
 
 @pytest.fixture
 def oracle_context():
@@ -51,6 +97,7 @@ def oracle_context():
         patch("src.models.bigquery_provider.BigQueryProvider") as mock_bq_provider_cls,
         patch("src.models.eligibility_pipeline.EligibilityPipeline") as mock_pipeline_cls,
         patch("src.models.blockchain_client.BlockchainClient") as mock_client_cls,
+        patch("src.models.data_edge_client.DataEdgeClient") as mock_data_edge_cls,
         patch("src.utils.circuit_breaker.CircuitBreaker") as mock_circuit_breaker_cls,
         patch("src.models.rewards_eligibility_oracle.Path") as mock_path_cls,
         patch("logging.Logger.error") as mock_logger_error,
@@ -67,13 +114,22 @@ def oracle_context():
 
         # Configure instance return values for mocked classes
         mock_bq_provider = mock_bq_provider_cls.return_value
-        mock_bq_provider.fetch_indexer_issuance_eligibility_data.return_value = pd.DataFrame()
+        mock_bq_provider.fetch_indexer_daily_metrics.return_value = pd.DataFrame()
 
         mock_pipeline = mock_pipeline_cls.return_value
         mock_pipeline.process.return_value = (["0xEligible"], ["0xIneligible"])
+        # The grid is returned so it can be published without being rebuilt, so it must be real data
+        mock_pipeline.write_daily_metrics.return_value = MOCK_DAILY_METRICS_GRID
         # Configure caching methods to force BigQuery path by default (for existing test compatibility)
         mock_pipeline.has_fresh_processed_data.return_value = False
         mock_pipeline.load_eligible_indexers_from_csv.return_value = ["0xEligible"]
+        # Cached artifacts default to already published, so a cache hit does not republish them
+        mock_pipeline.load_run_metadata.return_value = dict(MOCK_PUBLISHED_RUN_METADATA)
+        mock_pipeline.load_daily_metrics_from_csv.return_value = MOCK_DAILY_METRICS_GRID
+        # Steady state: earlier runs have covered every reachable day up to yesterday
+        mock_pipeline.find_published_days.return_value = {
+            (date.today() - timedelta(days=offset)).isoformat() for offset in range(1, 8)
+        }
 
         mock_client = mock_client_cls.return_value
         mock_client.batch_renew_indexer_rewards_eligibility.return_value = (
@@ -107,6 +163,8 @@ def oracle_context():
             "pipeline": mock_pipeline,
             "client_cls": mock_client_cls,
             "client": mock_client,
+            "data_edge_cls": mock_data_edge_cls,
+            "data_edge": mock_data_edge_cls.return_value,
             "circuit_breaker": mock_breaker_instance,
             "project_root": mock_project_root,
             "logger_error": mock_logger_error,
@@ -125,7 +183,7 @@ def test_main_succeeds_on_happy_path(oracle_context):
     )
 
     ctx["bq_provider_cls"].assert_called_once()
-    ctx["bq_provider"].fetch_indexer_issuance_eligibility_data.assert_called_once()
+    ctx["bq_provider"].fetch_indexer_daily_metrics.assert_called_once()
 
     ctx["pipeline_cls"].assert_called_once()
     ctx["pipeline"].process.assert_called_once()
@@ -169,7 +227,7 @@ def test_main_handles_failures_at_each_stage(oracle_context, failing_component, 
         "load_config": ctx["load_config"],
         "slack_create": ctx["slack"]["create"],
         "cache_load": ctx["pipeline"].load_eligible_indexers_from_csv,
-        "bq_provider": ctx["bq_provider"].fetch_indexer_issuance_eligibility_data,
+        "bq_provider": ctx["bq_provider"].fetch_indexer_daily_metrics,
         "pipeline_process": ctx["pipeline"].process,
         "pipeline_clean": ctx["pipeline"].clean_old_date_directories,
         "client": ctx["client"].batch_renew_indexer_rewards_eligibility,
@@ -207,8 +265,8 @@ def test_main_uses_date_override_correctly(oracle_context):
 
     ctx["main"](run_date_override=override)
 
-    ctx["bq_provider"].fetch_indexer_issuance_eligibility_data.assert_called_once()
-    args, _ = ctx["bq_provider"].fetch_indexer_issuance_eligibility_data.call_args
+    ctx["bq_provider"].fetch_indexer_daily_metrics.assert_called_once()
+    args, _ = ctx["bq_provider"].fetch_indexer_daily_metrics.call_args
     assert args == (start_expected, override)
 
 
@@ -352,3 +410,381 @@ def test_main_falls_back_to_bigquery_when_cached_data_load_fails(oracle_context)
     ctx["bq_provider_cls"].assert_called_once()
     # Should call process normally after fallback
     ctx["pipeline"].process.assert_called_once()
+
+
+# --- Tests for DataEdge publishing ---
+
+
+def test_main_skips_data_edge_publishing_when_no_contract_is_configured(oracle_context):
+    """Test that publishing is skipped, rather than attempted, when no DataEdge contract is set."""
+    ctx = oracle_context
+
+    ctx["main"]()
+
+    ctx["data_edge_cls"].assert_not_called()
+    # The rest of the run is unaffected
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
+
+
+def test_main_publishes_daily_metrics_when_a_contract_is_configured(oracle_context):
+    """Test that a configured DataEdge contract receives the run's per-day metrics payload."""
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+
+    ctx["main"]()
+
+    # The client is pointed at the configured contract, on the same chain as the renewals
+    ctx["data_edge_cls"].assert_called_once()
+    call_kwargs = ctx["data_edge_cls"].call_args.kwargs
+    assert call_kwargs["contract_address"] == MOCK_DATA_EDGE_ADDRESS
+    assert call_kwargs["chain_id"] == MOCK_CONFIG["BLOCKCHAIN_CHAIN_ID"]
+
+    # A real, non-empty payload is published
+    ctx["data_edge"].post_payload.assert_called_once()
+    payload, private_key = ctx["data_edge"].post_payload.call_args.args
+    assert payload.startswith(b"RE")
+    assert private_key == MOCK_CONFIG["PRIVATE_KEY"]
+
+
+def test_main_publishes_after_submitting_renewals(oracle_context):
+    """
+    Test that renewals are submitted before metrics are published. Renewals replace the sender's
+    oldest pending transaction, so a publish still in flight would be evicted by them.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+
+    call_order = []
+    ctx["client"].batch_renew_indexer_rewards_eligibility.side_effect = lambda **kwargs: (
+        call_order.append("renew") or (["http://tx-link"], "https://test-rpc.com")
+    )
+    ctx["data_edge"].post_payload.side_effect = lambda *args: call_order.append("publish")
+
+    ctx["main"]()
+
+    assert call_order == ["renew", "publish"]
+
+
+def test_main_still_publishes_when_renewal_submission_fails(oracle_context):
+    """
+    Test that a failed submission still leaves the run's diagnostics on chain, since that is when the
+    indexers reading them most need them, and that the run still fails afterwards.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    error = Exception("submission error")
+    ctx["client"].batch_renew_indexer_rewards_eligibility.side_effect = error
+
+    with pytest.raises(SystemExit) as excinfo:
+        ctx["main"]()
+
+    ctx["data_edge"].post_payload.assert_called_once()
+
+    # The submission failure is still what fails the run, reported against its own stage
+    assert excinfo.value.code == 1
+    ctx["logger_error"].assert_any_call(f"Oracle failed at stage 'Blockchain Submission': {error}", exc_info=True)
+
+
+def test_main_does_not_republish_a_cached_run_that_already_published(oracle_context):
+    """
+    Test that a run replaying cached data does not pay to publish metrics that already reached the
+    chain, which its manifest records.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["pipeline"].has_fresh_processed_data.return_value = True
+
+    ctx["main"]()
+
+    ctx["data_edge"].post_payload.assert_not_called()
+    # Renewals still run from the cached list
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
+
+
+def test_main_retries_publishing_for_a_cached_run_that_never_published(oracle_context):
+    """
+    Test that a cache hit picks up a publish the run that wrote the artifacts did not complete.
+    Without this a failure could never be retried, since a re-run inside the cache window takes the
+    cached path and the trailing days would go unpublished for good.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["pipeline"].has_fresh_processed_data.return_value = True
+    ctx["pipeline"].load_run_metadata.return_value = {**MOCK_PUBLISHED_RUN_METADATA, "published_tx": None}
+    ctx["data_edge"].post_payload.return_value = "https://arbiscan.io/tx/0xretried"
+
+    ctx["main"]()
+
+    # The grid is read back from disk rather than BigQuery
+    ctx["pipeline"].load_daily_metrics_from_csv.assert_called_once_with(date.today())
+    ctx["bq_provider_cls"].assert_not_called()
+
+    # The retry is recorded, so a further cache hit does not publish again
+    ctx["data_edge"].post_payload.assert_called_once()
+    ctx["pipeline"].record_published_transaction.assert_called_once_with(
+        date.today(), "https://arbiscan.io/tx/0xretried", [date.today().isoformat()]
+    )
+
+
+def test_main_publishes_a_cached_run_under_the_criteria_that_produced_it(oracle_context):
+    """
+    Test that a retry describes the artifacts it is publishing, not the config of the run doing the
+    retrying, since is_online_day only means anything against the thresholds that produced it.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["pipeline"].has_fresh_processed_data.return_value = True
+
+    # The cached run applied a different subgraph threshold to the one configured now
+    cached_criteria = {**MOCK_PUBLISHED_RUN_METADATA["criteria"], "MIN_SUBGRAPHS": 5}
+    ctx["pipeline"].load_run_metadata.return_value = {
+        **MOCK_PUBLISHED_RUN_METADATA,
+        "criteria": cached_criteria,
+        "published_tx": None,
+    }
+
+    with patch("src.models.rewards_eligibility_oracle.encode_payload") as mock_encode:
+        ctx["main"]()
+
+    assert mock_encode.call_args.kwargs["criteria"] == cached_criteria
+    assert mock_encode.call_args.kwargs["window_start"] == MOCK_CACHED_WINDOW_START
+    assert mock_encode.call_args.kwargs["indexers_evaluated"] == 42
+
+
+@pytest.mark.parametrize(
+    "unreadable_artifact",
+    ["missing_manifest", "malformed_grid", "incomplete_manifest"],
+)
+def test_main_renews_from_cache_when_the_publish_artifacts_cannot_be_read(oracle_context, unreadable_artifact):
+    """
+    Test that a cached run whose publish artifacts cannot be read still renews from the cached list,
+    skipping only the publish retry. Publishing is best-effort, so it must not force a BigQuery re-query
+    that could fail the renewals.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["pipeline"].has_fresh_processed_data.return_value = True
+    ctx["pipeline"].load_eligible_indexers_from_csv.return_value = ["0xCachedEligible"]
+    unpublished_metadata = {**MOCK_PUBLISHED_RUN_METADATA, "published_tx": None}
+
+    if unreadable_artifact == "missing_manifest":
+        ctx["pipeline"].load_run_metadata.side_effect = FileNotFoundError("Run metadata not found")
+    elif unreadable_artifact == "malformed_grid":
+        ctx["pipeline"].load_run_metadata.return_value = unpublished_metadata
+        ctx["pipeline"].load_daily_metrics_from_csv.side_effect = ValueError("Error reading daily metrics")
+    else:
+        ctx["pipeline"].load_run_metadata.return_value = {
+            key: value for key, value in unpublished_metadata.items() if key != "criteria"
+        }
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    # Renewals go ahead from the cache, without touching BigQuery
+    ctx["bq_provider_cls"].assert_not_called()
+    assert ctx["client"].batch_renew_indexer_rewards_eligibility.call_args.kwargs["indexer_addresses"] == [
+        "0xCachedEligible"
+    ]
+
+    # Nothing half-read is published, and the skipped retry is alerted on
+    ctx["data_edge"].post_payload.assert_not_called()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: DataEdge publish retry skipped"
+
+
+@pytest.mark.parametrize("failing_step", ["write_daily_metrics", "write_run_metadata"])
+def test_main_renews_when_the_daily_metrics_cannot_be_saved(oracle_context, failing_step):
+    """
+    Test that a failure saving the per-day metrics, which only the publish needs, skips the publish
+    rather than failing the run before any eligibility is renewed.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    getattr(ctx["pipeline"], failing_step).side_effect = TypeError(
+        "'<' not supported between instances of 'str' and 'NoneType'"
+    )
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    # Renewals go ahead and the run still succeeds
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
+    ctx["circuit_breaker"].record_failure.assert_not_called()
+    ctx["slack"]["notifier"].send_success_notification.assert_called_once()
+
+    # Nothing is published from artifacts that were not saved, and the skip is alerted on
+    ctx["data_edge"].post_payload.assert_not_called()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: daily metrics not saved"
+
+
+@pytest.mark.parametrize(
+    "configured_days, uncovered_offsets, expected_offsets",
+    [
+        (2, [0], [1, 0]),
+        (2, [0, 1], [1, 0]),
+        (2, [0, 3], [3, 2, 1, 0]),
+        (2, list(range(0, 9)), [6, 5, 4, 3, 2, 1, 0]),
+        (1, [0], [0]),
+        (1, [0, 2], [2, 1, 0]),
+    ],
+    ids=[
+        "steady_state_publishes_the_overlap",
+        "retries_a_day_an_earlier_run_held_back",
+        "reaches_back_to_the_oldest_uncovered_day",
+        "capped_at_the_catch_up_limit",
+        "single_day_setting",
+        "single_day_setting_still_covers_a_gap",
+    ],
+)
+def test_select_days_to_publish_covers_every_day_not_yet_on_chain(
+    configured_days, uncovered_offsets, expected_offsets
+):
+    """
+    Tests that a run selects the configured overlap plus any reachable day not already on chain, so a
+    day an earlier run held back or failed to publish is retried rather than lost. Offsets count back
+    from the run date, and the reach back is capped to bound the payload.
+    """
+    # Arrange: every reachable day is covered except the given offsets
+    run_date = date(2026, 10, 1)
+    uncovered = {(run_date - timedelta(days=offset)).isoformat() for offset in uncovered_offsets}
+    pipeline = MagicMock()
+    pipeline.find_published_days.return_value = {
+        (run_date - timedelta(days=offset)).isoformat() for offset in range(0, 10)
+    } - uncovered
+
+    # Act
+    selected = reo_module()._select_days_to_publish(
+        {"DATA_EDGE_PUBLISH_DAYS": configured_days},
+        pipeline,
+        run_date,
+        run_date - timedelta(days=28),
+        run_date,
+    )
+
+    # Assert
+    assert selected == [run_date - timedelta(days=offset) for offset in expected_offsets]
+
+
+def test_main_records_only_the_days_the_payload_carried(oracle_context):
+    """
+    Test that a held-back day is not recorded as published just because the run published another day.
+
+    Recording the run date alone would mark the held-back day as covered, and since a run only reaches
+    back over days that are not covered, it would never be retried before leaving the window.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["data_edge"].post_payload.return_value = "https://arbiscan.io/tx/0xpartial"
+
+    # The run selects yesterday and today; only today has data, so only today can be published
+    ctx["main"]()
+
+    ctx["pipeline"].record_published_transaction.assert_called_once_with(
+        date.today(), "https://arbiscan.io/tx/0xpartial", [date.today().isoformat()]
+    )
+
+    # The day that was held back is absent, so a later run still sees it as needing publication
+    recorded_days = ctx["pipeline"].record_published_transaction.call_args.args[2]
+    assert (date.today() - timedelta(days=1)).isoformat() not in recorded_days
+
+
+def test_main_alerts_when_a_held_back_day_can_no_longer_be_reached(oracle_context):
+    """
+    Test that a held-back day on its last reachable run raises an alert rather than a log line. After
+    this run it falls outside the catch-up window, so its metrics can never be published.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+
+    # Only the oldest reachable day is still missing, and it has no data in the grid either
+    last_reachable = date.today() - timedelta(days=reo_module().MAX_PUBLISH_CATCH_UP_DAYS - 1)
+    ctx["pipeline"].find_published_days.return_value = {
+        (date.today() - timedelta(days=offset)).isoformat() for offset in range(1, 8)
+    } - {last_reachable.isoformat()}
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    # Today is still published, and the day about to be lost is alerted on
+    ctx["data_edge"].post_payload.assert_called_once()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: a day will never be published"
+    assert last_reachable.isoformat() in mock_alert.call_args.kwargs["description"]
+
+
+def test_main_does_not_record_an_unconfirmed_publish(oracle_context):
+    """
+    Test that a publish whose outcome is unknown is not recorded as done, so a later run retries it.
+    A repeat is a restatement to a consumer, while an unrecorded loss cannot be recovered.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["data_edge"].post_payload.side_effect = DataEdgePendingError("unknown outcome", "http://tx")
+
+    ctx["main"]()
+
+    ctx["pipeline"].record_published_transaction.assert_not_called()
+
+
+def test_main_survives_a_data_edge_publishing_failure(oracle_context):
+    """
+    Test that a publishing failure does not fail the run, since the payload is diagnostic and the
+    renewal transactions matter more.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["data_edge"].post_payload.side_effect = Exception("all providers failed")
+
+    ctx["main"]()
+
+    # Renewals still happen and the run still reports success
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
+    ctx["circuit_breaker"].record_failure.assert_not_called()
+    ctx["slack"]["notifier"].send_success_notification.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "grid",
+    [
+        pd.DataFrame(columns=MOCK_DAILY_METRICS_GRID.columns),
+        MOCK_DAILY_METRICS_GRID.assign(day="2026-09-01"),
+    ],
+    ids=["no_rows_at_all", "activity_only_before_the_published_days"],
+)
+def test_main_skips_publishing_when_the_published_days_have_no_activity(oracle_context, grid):
+    """
+    Test that trailing days with no query attempts at all are treated as missing source data and not
+    published, since they would otherwise go on chain as a day on which every indexer was routed nothing.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["pipeline"].write_daily_metrics.return_value = grid
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    ctx["data_edge"].post_payload.assert_not_called()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: DataEdge publishing skipped"
+
+    # The rest of the run is unaffected
+    ctx["slack"]["notifier"].send_success_notification.assert_called_once()
+
+
+def test_main_publishes_the_days_that_have_activity_when_another_has_none(oracle_context):
+    """
+    Test that a trailing day with no query attempts is held back on its own rather than blocking the
+    day beside it, which is ready. The held-back day is retried while the window still reaches it.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+
+    # Yesterday is published too, but nothing was routed on it
+    idle_yesterday = MOCK_DAILY_METRICS_GRID.assign(
+        day=(date.today() - timedelta(days=1)).isoformat(), query_attempts=0, qualifying_queries=0
+    )
+    ctx["pipeline"].write_daily_metrics.return_value = pd.concat([idle_yesterday, MOCK_DAILY_METRICS_GRID])
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    # Today still reaches the chain, and nothing is reported as skipped
+    ctx["data_edge"].post_payload.assert_called_once()
+    assert mock_alert.call_count == 0

@@ -7,12 +7,13 @@ This module contains the logic for processing raw BigQuery data into a list of e
 - Cleanup of old data.
 """
 
+import json
 import logging
 import shutil
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
@@ -22,6 +23,24 @@ logger = logging.getLogger(__name__)
 RAW_DATA_FILE = "indexer_issuance_eligibility_data.csv"
 ELIGIBLE_INDEXERS_FILE = "eligible_indexers.csv"
 INELIGIBLE_INDEXERS_FILE = "ineligible_indexers.csv"
+DAILY_METRICS_FILE = "indexer_daily_metrics.csv"
+RUN_METADATA_FILE = "run_metadata.json"
+
+# Per-day artifact columns, in output order
+DAILY_METRICS_COLUMNS = [
+    "day",
+    "indexer",
+    "query_attempts",
+    "qualifying_queries",
+    "qualifying_subgraphs",
+    "failed_status",
+    "failed_latency",
+    "failed_blocks_behind",
+    "is_online_day",
+]
+
+# Counters that are zero on a day an indexer received no query attempts
+DAILY_METRICS_COUNT_COLUMNS = [column for column in DAILY_METRICS_COLUMNS if column not in ("day", "indexer")]
 
 
 class EligibilityPipeline:
@@ -109,6 +128,279 @@ class EligibilityPipeline:
         logger.info(f"Saved {len(ineligible_df)} ineligible indexers to: {ineligible_path}")
 
 
+    def build_daily_metrics_grid(
+        self, daily_metrics: pd.DataFrame, window_start: date, window_end: date
+    ) -> pd.DataFrame:
+        """
+        Expand sparse per-day rows into a complete day grid for every indexer daily_metrics contains.
+
+        BigQuery only records query attempts, so a day on which an indexer was routed nothing produces
+        no row at all. Those days are emitted as explicit zero rows to keep 'no queries routed' visible
+        rather than something a consumer has to infer from a gap.
+
+        The set of indexers is taken from daily_metrics and is not widened here. An indexer that
+        received no attempts anywhere in the window is absent from the query result and so from this
+        grid: the oracle reads only the attempts table and has no roster of who exists, so it cannot
+        tell such an indexer apart from one that was never deployed. Consumers that do hold a roster,
+        such as the dashboard, are the ones able to report them. Widening this would mean giving the
+        oracle a second data source, which is a design decision rather than a gap to be filled here.
+
+        Args:
+            daily_metrics: Per-day metrics from BigQuery, one row per indexer per day with data
+            window_start: First day of the analysis window
+            window_end: Last day of the analysis window
+
+        Returns:
+            pd.DataFrame: Dense grid with the columns in DAILY_METRICS_COLUMNS
+        """
+        # Preserve the output structure when the window contains no data at all
+        if daily_metrics is None or daily_metrics.empty:
+            return pd.DataFrame(columns=DAILY_METRICS_COLUMNS)
+
+        self.validate_dataframe_structure(daily_metrics, DAILY_METRICS_COLUMNS)
+
+        # Normalise days to strings so BigQuery dates and SQLite text both index consistently
+        grid = daily_metrics.copy()
+        grid["day"] = pd.to_datetime(grid["day"]).dt.strftime("%Y-%m-%d")
+
+        # Build every indexer/day combination the window should contain
+        days = pd.date_range(start=window_start, end=window_end, freq="D").strftime("%Y-%m-%d")
+        indexers = sorted(grid["indexer"].unique())
+        full_index = pd.MultiIndex.from_product([indexers, days], names=["indexer", "day"])
+
+        # Reindex onto the full grid, filling the days that produced no rows with zeroes
+        grid = (
+            grid.set_index(["indexer", "day"])[DAILY_METRICS_COUNT_COLUMNS]
+            .reindex(full_index, fill_value=0)
+            .reset_index()
+        )
+
+        # Keep counters whole so the artifact does not render them as floats
+        for column in DAILY_METRICS_COUNT_COLUMNS:
+            grid[column] = pd.to_numeric(grid[column], errors="coerce").fillna(0).astype("int64")
+
+        # Return the grid ordered so each indexer's window reads as a run of consecutive days
+        return grid[DAILY_METRICS_COLUMNS].sort_values(by=["indexer", "day"], ignore_index=True)
+
+
+    def write_daily_metrics(
+        self, daily_metrics: pd.DataFrame, current_date: date, window_start: date, window_end: date
+    ) -> pd.DataFrame:
+        """
+        Save the per-day metrics grid for the analysis window to a date-specific directory.
+
+        The grid spans the whole window rather than the run date alone, so the artifact reproduces the
+        eligibility decision it sits beside without having to be stitched to neighbouring runs.
+
+        Args:
+            daily_metrics: Per-day metrics from BigQuery
+            current_date: The date of the current run, used for creating the output directory
+            window_start: First day of the analysis window
+            window_end: Last day of the analysis window
+
+        Returns:
+            pd.DataFrame: The grid that was written, so callers can reuse it without rebuilding it
+        """
+        grid = self.build_daily_metrics_grid(daily_metrics, window_start, window_end)
+
+        output_date_dir = self.get_date_output_directory(current_date)
+        output_date_dir.mkdir(exist_ok=True, parents=True)
+
+        daily_metrics_path = output_date_dir / DAILY_METRICS_FILE
+        grid.to_csv(daily_metrics_path, index=False)
+        logger.info(f"Saved {len(grid)} daily metric rows to: {daily_metrics_path}")
+
+        return grid
+
+
+    def write_run_metadata(
+        self,
+        current_date: date,
+        window_start: date,
+        window_end: date,
+        criteria: Dict[str, Optional[int]],
+        source: str,
+        indexers_evaluated: int,
+        indexers_eligible: int,
+    ) -> Path:
+        """
+        Save the manifest describing how a run was produced.
+
+        Recording the thresholds keeps each run's artifacts interpretable after the eligibility criteria
+        change, since is_online_day only means anything against the criteria that produced it.
+
+        Args:
+            current_date: The date of the current run
+            window_start: First day of the analysis window
+            window_end: Last day of the analysis window
+            criteria: Eligibility thresholds applied by this run
+            source: How the artifacts were produced, which is always 'bigquery' since a run serving
+                cached artifacts leaves the manifest of the run that produced them in place
+            indexers_evaluated: Number of indexers the run considered
+            indexers_eligible: Number of indexers the run found eligible
+
+        Returns:
+            Path: Path to the saved JSON
+        """
+        metadata = {
+            "run_date": current_date.strftime("%Y-%m-%d"),
+            "window_start": window_start.strftime("%Y-%m-%d"),
+            "window_end": window_end.strftime("%Y-%m-%d"),
+            "criteria": criteria,
+            "source": source,
+            "indexers_evaluated": indexers_evaluated,
+            "indexers_eligible": indexers_eligible,
+            # Records that the per-day metrics reached the chain, so a later run serving these same
+            # artifacts can tell a publish that has still to happen from one already done
+            "published_tx": None,
+            # The days that transaction actually carried. A run can publish a subset of the days it
+            # selected, when one of them had no query attempts, so coverage is tracked per day rather
+            # than inferred from the run date; otherwise a held-back day is never retried.
+            "published_days": [],
+        }
+
+        output_date_dir = self.get_date_output_directory(current_date)
+        output_date_dir.mkdir(exist_ok=True, parents=True)
+
+        metadata_path = output_date_dir / RUN_METADATA_FILE
+        metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+        logger.info(f"Saved run metadata to: {metadata_path}")
+
+        return metadata_path
+
+
+    def load_run_metadata(self, current_date: date) -> Dict[str, Any]:
+        """
+        Load the manifest describing how a date's artifacts were produced.
+
+        Args:
+            current_date: The date whose manifest to load
+
+        Returns:
+            Dict[str, Any]: The manifest contents
+
+        Raises:
+            FileNotFoundError: If no manifest exists for the given date
+            ValueError: If the manifest cannot be parsed
+        """
+        metadata_path = self.get_date_output_directory(current_date) / RUN_METADATA_FILE
+
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Run metadata not found: {metadata_path}")
+
+        try:
+            return json.loads(metadata_path.read_text())
+
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Error reading run metadata {metadata_path}: {e}") from e
+
+
+    def load_daily_metrics_from_csv(self, current_date: date) -> pd.DataFrame:
+        """
+        Load a date's per-day metrics grid back from its CSV.
+
+        Lets a run reuse the grid an earlier run wrote without querying BigQuery again, which is what
+        allows a publish that failed to be retried from the artifacts it left behind.
+
+        Args:
+            current_date: The date whose grid to load
+
+        Returns:
+            pd.DataFrame: The grid, with the columns in DAILY_METRICS_COLUMNS
+
+        Raises:
+            FileNotFoundError: If no grid exists for the given date
+            ValueError: If the grid is malformed
+        """
+        grid_path = self.get_date_output_directory(current_date) / DAILY_METRICS_FILE
+
+        if not grid_path.exists():
+            raise FileNotFoundError(f"Daily metrics CSV not found: {grid_path}")
+
+        try:
+            # Days are read back as strings, which is the form the payload encoder expects
+            grid = pd.read_csv(grid_path, dtype={"day": str})
+
+        except Exception as e:
+            raise ValueError(f"Error reading daily metrics {grid_path}: {e}") from e
+
+        self.validate_dataframe_structure(grid, DAILY_METRICS_COLUMNS)
+
+        return grid
+
+
+    def record_published_transaction(self, current_date: date, tx_url: str, published_days: List[str]) -> None:
+        """
+        Record in a date's manifest that its per-day metrics were published on chain.
+
+        Only a confirmed publish is recorded. An unresolved one is deliberately left unrecorded so
+        that it is retried: the payload is keyed by indexer and day, so a consumer treats a repeat as
+        a restatement, whereas an unrecorded loss cannot be recovered once the window moves on.
+
+        The days are recorded individually rather than implied by the run date, because a run publishes
+        only the selected days that had query attempts. Recording the run date alone would mark a
+        held-back day as covered and it would never be retried.
+
+        Args:
+            current_date: The date whose manifest to update
+            tx_url: Explorer URL of the publishing transaction
+            published_days: The days the transaction carried, as 'YYYY-MM-DD' strings
+        """
+        metadata_path = self.get_date_output_directory(current_date) / RUN_METADATA_FILE
+
+        try:
+            metadata = self.load_run_metadata(current_date)
+            metadata["published_tx"] = tx_url
+            metadata["published_days"] = sorted(published_days)
+            metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+            logger.info(f"Recorded {len(published_days)} published days in: {metadata_path}")
+
+        # The publish itself succeeded, so a manifest that cannot be updated must not fail the run
+        except Exception as e:
+            logger.error(f"Failed to record the published metrics transaction: {e}", exc_info=True)
+
+
+    def find_published_days(self, current_date: date, lookback_days: int) -> Set[str]:
+        """
+        Collect the days already published on chain by runs in the lookback_days before current_date.
+
+        Coverage is read per day rather than inferred from a run date, because a run publishes only the
+        selected days that had query attempts. A run's own manifest is excluded, since the publish this
+        feeds into has not happened yet.
+
+        Args:
+            current_date: The run date to look back from, exclusive
+            lookback_days: How many days back to read manifests for
+
+        Returns:
+            Set[str]: The 'YYYY-MM-DD' days known to be on chain
+        """
+        published_days: Set[str] = set()
+
+        for offset in range(1, lookback_days + 1):
+            run_date = current_date - timedelta(days=offset)
+
+            # A missing or corrupt manifest means that day's run did not publish anything usable
+            try:
+                metadata = self.load_run_metadata(run_date)
+
+            except (FileNotFoundError, ValueError):
+                continue
+
+            if not metadata.get("published_tx"):
+                continue
+
+            # Manifests written before days were tracked only imply their own run date, which is what
+            # the run date was previously taken to mean
+            recorded_days = metadata.get("published_days")
+            if recorded_days:
+                published_days.update(recorded_days)
+            else:
+                published_days.add(run_date.isoformat())
+
+        return published_days
+
+
     def clean_old_date_directories(self, max_age_before_deletion: int) -> None:
         """
         Remove old date directories to prevent unlimited growth.
@@ -182,7 +474,7 @@ class EligibilityPipeline:
             current_date: The date to check for existing data
 
         Returns:
-            bool: True if all required CSV files exist and are not empty
+            bool: True if all required output files exist and are not empty
         """
         output_date_dir = self.get_date_output_directory(current_date)
 
@@ -190,11 +482,14 @@ class EligibilityPipeline:
         if not output_date_dir.exists():
             return False
 
-        # Define required files
+        # Define required files. The per-day artifacts are included so a cache hit cannot serve a run
+        # whose grid or manifest is missing.
         required_files = [
             ELIGIBLE_INDEXERS_FILE,
             RAW_DATA_FILE,
             INELIGIBLE_INDEXERS_FILE,
+            DAILY_METRICS_FILE,
+            RUN_METADATA_FILE,
         ]
 
         # Check that all required files exist and are not empty

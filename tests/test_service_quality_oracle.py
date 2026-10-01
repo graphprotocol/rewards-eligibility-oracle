@@ -607,19 +607,31 @@ def test_main_renews_when_the_daily_metrics_cannot_be_saved(oracle_context, fail
 
 
 @pytest.mark.parametrize(
-    "days_since_last_publish, expected_publish_days",
-    [(1, 2), (4, 5), (9, 7), (None, 7)],
-    ids=["usual_overlap", "covers_missed_days", "capped", "no_recent_publish"],
+    "configured_days, days_since_last_publish, expected_publish_days",
+    [(2, 1, 2), (2, 4, 5), (2, 9, 7), (2, None, 7), (1, 1, 1), (1, 4, 4)],
+    ids=[
+        "usual_overlap",
+        "covers_missed_days",
+        "capped",
+        "no_recent_publish",
+        "single_day_setting",
+        "single_day_setting_covers_missed_days",
+    ],
 )
 def test_main_reaches_back_to_the_last_published_day(
-    oracle_context, days_since_last_publish, expected_publish_days
+    oracle_context, configured_days, days_since_last_publish, expected_publish_days
 ):
     """
-    Test that a run publishes every day since the last confirmed publish, not just its usual overlap,
-    so a day an earlier run failed to publish is not lost. The reach back is capped to bound the payload.
+    Test that a run publishes every day since the last confirmed publish plus its usual overlap, so a day
+    an earlier run failed to publish is not lost, while a run after a successful one publishes only the
+    configured days. The reach back is capped to bound the payload.
     """
     ctx = oracle_context
-    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["load_config"].return_value = {
+        **MOCK_CONFIG,
+        "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS,
+        "DATA_EDGE_PUBLISH_DAYS": configured_days,
+    }
     ctx["pipeline"].find_last_published_day.return_value = (
         None if days_since_last_publish is None else date.today() - timedelta(days=days_since_last_publish)
     )

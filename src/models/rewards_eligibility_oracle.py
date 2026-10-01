@@ -190,22 +190,22 @@ def publish_daily_metrics_to_data_edge(
 
 def _count_days_to_publish(config, pipeline, run_date, window_end) -> int:
     """
-    Count the trailing days to publish: the configured overlap, widened back to the last confirmed
-    publish so that days earlier runs failed to publish are covered, up to MAX_PUBLISH_CATCH_UP_DAYS.
+    Count the trailing days to publish: every day since the last confirmed publish plus the configured
+    overlap, so days earlier runs failed to publish are covered, up to MAX_PUBLISH_CATCH_UP_DAYS.
     """
     configured_days = config["DATA_EDGE_PUBLISH_DAYS"]
     last_published_day = pipeline.find_last_published_day(run_date, MAX_PUBLISH_CATCH_UP_DAYS)
 
     # With no confirmed publish in reach, every day back to the cap may be missing from the chain
     if last_published_day is None:
-        days_since_last_publish = MAX_PUBLISH_CATCH_UP_DAYS
+        days_needed = MAX_PUBLISH_CATCH_UP_DAYS
     else:
-        days_since_last_publish = min((window_end - last_published_day).days + 1, MAX_PUBLISH_CATCH_UP_DAYS)
+        days_needed = min((window_end - last_published_day).days + configured_days - 1, MAX_PUBLISH_CATCH_UP_DAYS)
 
-    if days_since_last_publish > configured_days:
-        logger.info(f"Publishing {days_since_last_publish} days to cover days earlier runs did not publish")
+    if days_needed > configured_days:
+        logger.info(f"Publishing {days_needed} days to cover days earlier runs did not publish")
 
-    return max(configured_days, days_since_last_publish)
+    return max(configured_days, days_needed)
 
 
 def main(run_date_override: date = None):

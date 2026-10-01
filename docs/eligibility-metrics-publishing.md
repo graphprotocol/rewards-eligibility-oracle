@@ -234,8 +234,8 @@ failed, and a day whose source data arrived late in BigQuery. Rows are keyed by 
 restatement is an upsert.
 
 **Reaching back over failed publishes.** A run whose publish fails still succeeds, so nothing re-runs
-it. Each run therefore widens its trailing days back to the last run whose manifest records a
-confirmed publish, up to 7 days (`MAX_PUBLISH_CATCH_UP_DAYS`, the scheduler's own limit on catching
+it. Each run therefore adds every day since the last run whose manifest records a confirmed publish
+to its usual overlap, up to 7 days (`MAX_PUBLISH_CATCH_UP_DAYS`, the scheduler's own limit on catching
 up missed runs). With no confirmed publish in the last 7 days, it publishes all 7, around 42 KB at
 200 indexers.
 

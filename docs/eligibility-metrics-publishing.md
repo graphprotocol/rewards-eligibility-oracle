@@ -326,9 +326,12 @@ Three properties worth keeping if the format is revised:
 - **Only a confirmed publish is recorded.** One that was broadcast without its outcome established
   stays unrecorded, so a later run retries it. A repeat is a restatement to a consumer, keyed by
   indexer and day, whereas an unrecorded loss cannot be recovered once the window moves on.
-- **Missing data is not published as zeros.** If none of the published days has a single query
-  attempt, the source data has not arrived, so the run skips publishing and alerts (OpsGenie P4).
-  Publishing would record every indexer as routed nothing, and the older day is never restated.
+- **Missing data is not published as zeros, per day.** A published day with no query attempts at all
+  means its source data has not arrived, not that the whole network was idle, so that day is omitted
+  from the payload — publishing it would record every indexer as routed nothing. It is held back on
+  its own, so a day whose data is ready still goes out, and the held-back day is published by a later
+  run while the overlap still reaches it. Only when *no* published day has data does the run skip
+  entirely and alert (OpsGenie P4).
 
 ---
 

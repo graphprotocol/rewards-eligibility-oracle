@@ -195,6 +195,9 @@ class ConfigLoader:
             "SLACK_WEBHOOK_URL": substituted_config.get("secrets", {}).get("SLACK_WEBHOOK_URL"),
             "ETHERSCAN_API_KEY": substituted_config.get("secrets", {}).get("ETHERSCAN_API_KEY"),
             "ARBITRUM_API_KEY": substituted_config.get("secrets", {}).get("ARBITRUM_API_KEY"),
+            # Optional, so it stays out of the required fields: alerting degrades to logging without it.
+            # It does have to reach the flat config though, or every alert is dropped for want of a key.
+            "OPSGENIE_API_KEY": substituted_config.get("secrets", {}).get("OPSGENIE_API_KEY"),
         }
         # fmt: on
 

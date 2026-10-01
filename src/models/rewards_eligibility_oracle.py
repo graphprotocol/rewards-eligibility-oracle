@@ -102,14 +102,19 @@ def publish_daily_metrics_to_data_edge(
     try:
         publish_days = config["DATA_EDGE_PUBLISH_DAYS"]
 
-        # No query attempts on any published day means the source data is missing, not that every indexer
-        # was idle. Publishing would record zeros for those days that the next run's overlap never fully restates.
+        # A day with no query attempts at all means its source data has not arrived, not that every
+        # indexer was idle. Such a day is held back rather than published as zeros; the encoder omits
+        # it, and a later run's overlap publishes it once the data is there.
         days_to_publish = [
             day.isoformat() for day in select_days_to_publish(window_start, window_end, publish_days)
         ]
         published_rows = daily_metrics_grid[daily_metrics_grid["day"].isin(days_to_publish)]
         attempts_by_day = published_rows.groupby("day")["query_attempts"].sum()
-        if any(attempts_by_day.get(day, 0) <= 0 for day in days_to_publish):
+        days_with_data = [day for day in days_to_publish if attempts_by_day.get(day, 0) > 0]
+
+        # Nothing to say at all, so there is no payload worth paying for
+        if not days_with_data:
+            logger.warning(f"Skipping DataEdge publishing: no query attempts recorded for {days_to_publish}")
             send_opsgenie_alert_safe(
                 api_key=config.get("OPSGENIE_API_KEY"),
                 message="Rewards Oracle: DataEdge publishing skipped",
@@ -121,6 +126,12 @@ def publish_daily_metrics_to_data_edge(
             )
 
             return None
+
+        # Publishing the days that do have data beats publishing none of them, but a day held back
+        # needs to be visible: it is only retried while the window still covers it
+        if len(days_with_data) < len(days_to_publish):
+            held_back = [day for day in days_to_publish if day not in days_with_data]
+            logger.warning(f"Publishing only {days_with_data}; no query attempts recorded for {held_back}")
 
         payload = encode_payload(
             run_date=run_date,

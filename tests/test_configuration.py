@@ -191,6 +191,41 @@ class TestConfigLoader:
         assert config["DATA_EDGE_PUBLISH_DAYS"] == 2
 
 
+    def test_load_config_carries_the_opsgenie_key_through(self, tmp_path: Path, monkeypatch):
+        """
+        GIVEN a config file providing OPSGENIE_API_KEY from the environment
+        WHEN the config is loaded
+        THEN the key reaches the flat config, since every alert is dropped without it.
+        """
+        # Arrange
+        monkeypatch.setenv("TEST_OPSGENIE_KEY", "opsgenie-key")
+        config_path = tmp_path / "config.toml"
+        config_path.write_text('[secrets]\nOPSGENIE_API_KEY = "$TEST_OPSGENIE_KEY"\n')
+        loader = ConfigLoader(config_path=str(config_path))
+
+        # Act
+        config = loader.get_flat_config()
+
+        # Assert
+        assert config["OPSGENIE_API_KEY"] == "opsgenie-key"
+
+
+    def test_load_config_leaves_the_opsgenie_key_unset_when_absent(self, temp_config_file: str, mock_env):
+        """
+        GIVEN a config file with no OPSGENIE_API_KEY
+        WHEN the config is loaded
+        THEN the key is None rather than missing, so alerting degrades to logging.
+        """
+        # Arrange
+        loader = ConfigLoader(config_path=temp_config_file)
+
+        # Act
+        config = loader.get_flat_config()
+
+        # Assert
+        assert config["OPSGENIE_API_KEY"] is None
+
+
     def test_load_config_fails_if_file_missing(self):
         """
         GIVEN an invalid file path

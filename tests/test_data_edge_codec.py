@@ -197,12 +197,13 @@ def test_encode_payload_omits_indexers_routed_nothing(daily_rows: list):
     assert [row["indexer"] for row in final_day["rows"]] == [INDEXER_A]
 
 
-def test_encode_payload_publishes_an_empty_day_when_nothing_was_served():
+def test_encode_payload_omits_a_day_nobody_served():
     """
-    Tests that a day with no activity at all still produces a message, so a consumer can tell the
-    difference between a quiet day and a day that was never published.
+    Tests that a day on which no indexer was routed anything is omitted rather than published as every
+    indexer having served nothing. That means its source data has not arrived, and publishing zeros
+    would record it as a network-wide idle day that only the overlap could restate.
     """
-    # Act
+    # Act: the published day has a row, but with no attempts on it
     payload = encode_payload(
         run_date=RUN_DATE,
         window_start=WINDOW_START,
@@ -213,12 +214,35 @@ def test_encode_payload_publishes_an_empty_day_when_nothing_was_served():
         indexers_eligible=0,
         publish_days=1,
     )
-    decoded = decode_payload(payload)
 
     # Assert
-    assert len(decoded["daily_metrics"]) == 1
-    assert decoded["daily_metrics"][0]["day"] == RUN_DATE
-    assert decoded["daily_metrics"][0]["rows"] == []
+    assert decode_payload(payload)["daily_metrics"] == []
+
+
+def test_encode_payload_publishes_only_the_days_that_have_data():
+    """
+    Tests that a day with data is still published when the day beside it has none, so one day's
+    missing source data does not hold back the day that is ready.
+    """
+    # Act: 2026-09-24 was routed nothing, 2026-09-25 was served
+    payload = encode_payload(
+        run_date=RUN_DATE,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        criteria=CRITERIA,
+        daily_rows=[
+            _row("2026-09-24", INDEXER_A),
+            _row("2026-09-25", INDEXER_A, query_attempts=12, qualifying_queries=12, is_online_day=1),
+        ],
+        indexers_evaluated=1,
+        indexers_eligible=1,
+        publish_days=2,
+    )
+    decoded = decode_payload(payload)
+
+    # Assert: only the day with data is on the wire
+    assert [day["day"] for day in decoded["daily_metrics"]] == [RUN_DATE]
+    assert decoded["daily_metrics"][0]["rows"][0]["query_attempts"] == 12
 
 
 def test_encode_payload_stays_compact(daily_rows: list):

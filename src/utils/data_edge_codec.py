@@ -20,10 +20,13 @@ Wire format (all integers are unsigned LEB128 varints of at most 64 bits, all da
                 failed_status, failed_latency, failed_blocks_behind, is_online_day
 
 Rows are emitted only for indexers that received query attempts that day, so an indexer absent from a
-day's rows was routed nothing on it. Nothing here enumerates the indexers a run evaluated: an indexer
-routed nothing across the whole window appears in no payload at all, and only a consumer holding its
-own roster can tell that apart from an indexer that does not exist. Criteria are published on every
-payload rather than on change, so a payload is interpretable without any prior state.
+day's rows was routed nothing on it. A day on which nobody served anything is omitted altogether,
+since that means its source data has not arrived rather than that the whole network was idle.
+
+Nothing here enumerates the indexers a run evaluated: an indexer routed nothing across the whole
+window appears in no payload at all, and only a consumer holding its own roster can tell that apart
+from an indexer that does not exist. Criteria are published on every payload rather than on change,
+so a payload is interpretable without any prior state.
 """
 
 import logging
@@ -224,6 +227,12 @@ def encode_payload(
     for day in select_days_to_publish(window_start, window_end, publish_days):
         # Skip indexers routed nothing that day; their absence is what encodes the zero row
         rows = [row for row in rows_by_day.get(day.isoformat(), []) if int(row["query_attempts"]) > 0]
+
+        # A day nobody served is a day whose source data has not arrived, so it is omitted rather than
+        # published as every indexer having been routed nothing. A later run publishes it once it has
+        # data, while the window still reaches back to it.
+        if not rows:
+            continue
 
         payload += _encode_varint(TAG_DAILY_METRICS)
         payload += _encode_day(day)

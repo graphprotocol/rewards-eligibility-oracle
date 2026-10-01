@@ -595,3 +595,25 @@ def test_main_skips_publishing_when_the_published_days_have_no_activity(oracle_c
 
     # The rest of the run is unaffected
     ctx["slack"]["notifier"].send_success_notification.assert_called_once()
+
+
+def test_main_publishes_the_days_that_have_activity_when_another_has_none(oracle_context):
+    """
+    Test that a trailing day with no query attempts is held back on its own rather than blocking the
+    day beside it, which is ready. The held-back day is retried while the window still reaches it.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+
+    # Yesterday is published too, but nothing was routed on it
+    idle_yesterday = MOCK_DAILY_METRICS_GRID.assign(
+        day=(date.today() - timedelta(days=1)).isoformat(), query_attempts=0, qualifying_queries=0
+    )
+    ctx["pipeline"].write_daily_metrics.return_value = pd.concat([idle_yesterday, MOCK_DAILY_METRICS_GRID])
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    # Today still reaches the chain, and nothing is reported as skipped
+    ctx["data_edge"].post_payload.assert_called_once()
+    assert mock_alert.call_count == 0

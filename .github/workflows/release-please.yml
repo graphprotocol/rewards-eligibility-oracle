@@ -1,6 +1,6 @@
-# Manages automated releases via release-please. On main branch pushes, first syncs
-# the release manifest with git tags (via sync-manifest action), then creates/updates
-# a Release PR with CHANGELOG and version bumps. Merging the Release PR triggers cd.yml.
+# Manages releases via release-please. On main pushes, syncs the release manifest with git tags,
+# then creates/updates a Release PR with CHANGELOG and version bumps. Merging the Release PR
+# creates the tag and release, then calls cd.yml to build and publish that tag's Docker image.
 
 name: Release Please
 
@@ -34,19 +34,38 @@ jobs:
     needs: sync-manifest
     # Run even if sync-manifest was skipped (bot commits)
     if: always() && (needs.sync-manifest.result == 'success' || needs.sync-manifest.result == 'skipped')
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Check for open sync PRs
         id: check-sync
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          SYNC_PR=$(gh pr list --repo ${{ github.repository }} --search "sync release-please manifest in:title" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+          SYNC_PR=$(gh pr list --repo "${{ github.repository }}" --search "sync release-please manifest in:title" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [ -n "$SYNC_PR" ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Skipping release-please - manifest sync PR #$SYNC_PR is open. Merge it first."
           else
-            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: google-github-actions/release-please-action@v4
+        id: release
         if: steps.check-sync.outputs.skip != 'true'
+
+  # Build the Docker image for a new release. The tag release-please pushes cannot start cd.yml
+  # itself, because GitHub does not start workflows from pushes made with GITHUB_TOKEN.
+  build-image:
+    needs: release-please
+    # !cancelled() keeps this job eligible when sync-manifest was skipped for bot commits
+    if: ${{ !cancelled() && needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      # cd.yml's create-release job declares contents: write, so the caller must allow it;
+      # that job only runs for manual dispatches
+      contents: write
+      packages: write
+    uses: ./.github/workflows/cd.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}

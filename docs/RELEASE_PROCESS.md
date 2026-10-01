@@ -71,7 +71,7 @@ When merged, release-please automatically:
 
 ### 4. Docker Image Publishing
 
-The CD workflow triggers automatically on tag creation:
+The Release Please workflow calls the CD workflow with the new tag as soon as it creates the release. The tag push alone cannot start the CD workflow, because GitHub does not start workflows from pushes made with the built-in `GITHUB_TOKEN`. The CD workflow then:
 
 1. Builds multi-architecture Docker images (amd64/arm64)
 2. Publishes to GitHub Container Registry:

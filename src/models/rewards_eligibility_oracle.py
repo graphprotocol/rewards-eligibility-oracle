@@ -205,7 +205,7 @@ def _count_days_to_publish(config, pipeline, run_date, window_end) -> int:
     if days_needed > configured_days:
         logger.info(f"Publishing {days_needed} days to cover days earlier runs did not publish")
 
-    return max(configured_days, days_needed)
+    return min(MAX_PUBLISH_CATCH_UP_DAYS, max(configured_days, days_needed))
 
 
 def main(run_date_override: date = None):

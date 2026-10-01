@@ -5,6 +5,76 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.13](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.12...v0.4.13) (2026-10-01)
+
+
+### Added
+
+* generate and post on chain daily eligibility details per indexer ([a956334](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/a956334aca27852a24d28bc4bd18710b2be42374))
+* publish metrics on chain ([ea288aa](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/ea288aaa1825a3e21727e4f79b51f2d7fe3e6498))
+
+
+### Fixed
+
+* add validation for query attempts before publishing ([b55b01f](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/b55b01f17417564a4ab6109c5cda17c07d22eb95))
+* adjust days to publish based on window size ([c24105c](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c24105c8617159b3304922d4a13c0ab6527d952d))
+* **bigquery:** stop counting missing measurements as slow or behind ([5b29b54](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/5b29b54c8d14101e8534f44deb71aabc797b678e))
+* cache hits + renewal ([c748e46](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c748e467336f19e087dbd6cc2e387142f278cea9))
+* **codec:** limit varints to 64 bits so a subgraph can decode them ([0ef64b1](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/0ef64b1073c77d73edf1160de44134813c6fb0a7))
+* **codec:** write message tags as varints, as the wire format states ([ebcc7f2](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/ebcc7f2a5eab06121f028d9ca48996b74cfe47af))
+* **config:** check the DataEdge settings when the service starts ([800e106](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/800e106aae2d374e574cbfdd75af15ebfabca519))
+* copilot issues ([e21926b](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/e21926b1e6737c643535c4326118b6b53e1d11a1))
+* handle overflow in date decoding ([76b6387](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/76b6387f379b211d0ebafc3df89236301616da88))
+* limit published days to a maximum threshold ([5b6a16d](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/5b6a16d6be806131a3dd517bdd0d4e5cfa9ec89f))
+* more fixes ([dab8f99](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/dab8f9946e38d11e8e862cb2a3d2111e75af6f3e))
+* **oracle:** keep renewing when the daily metrics cannot be saved ([db2b112](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/db2b112c04246af4265ad2525b47edd085337f6e))
+* **oracle:** renew from cache when the publish files cannot be read ([9e76d12](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/9e76d12cb76cb8f2668e704759387d1f8cf0476a))
+* partial published retries ([83204a4](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/83204a4edab18976e8ee7f6311b4f27c4964c254))
+* **publishing:** confirm through the next provider if one fails mid-wait ([0541368](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/0541368957e3103032a56287b454b301a0060927))
+* **publishing:** keep a 1-day publish setting at 1 day after a good run ([121b289](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/121b289628a552b5c532bd0e672d9e15adfad0a3))
+* **publishing:** name the transaction when no provider can send it ([b37739f](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/b37739f26885be585870e937db4374756e3ab7d2))
+* **publishing:** reach back over days earlier runs failed to publish ([2b10537](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/2b1053732fe47a74977f8339c2d7c37944e180e8))
+* **publishing:** refuse to publish to an address with no contract code ([c80b114](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c80b114c64f7d7636d3d9651906d524cd19f63ed))
+* **publishing:** sign afresh when another transaction took the nonce ([e10922a](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/e10922a3815018e591d0e03257e795393fd8c760))
+* **publishing:** sign the metrics once and resend it to each provider ([ac9adfb](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/ac9adfbdc0a16d2ec3d65d670ad28a4a832bf6d0))
+* **publishing:** skip publishing when the trailing days have no data ([1f5ca2f](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/1f5ca2f05abf9142ccb53c687fcf05f0c5c8e76d))
+* **publishing:** stop sending a payload that reverts in gas estimation ([2728429](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/27284291112c1c682992f2f69b2cc235528d7308))
+* **publishing:** treat only rate limits as refused among node errors ([871bbdb](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/871bbdb08b0c032ee33c1176217229b709bb442f))
+* **publishing:** try the next provider when a rate-limited send fails ([c5e718c](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c5e718c469a40dca76ab9555689ee83241c3a0a1))
+* refactor publish_days assignment with conditional check ([dff3841](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/dff3841942591b97cd4fd0bf274fb5128f1b915a))
+* restore per-day row filtering in the DataEdge payload encoder ([15994c8](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/15994c81559311ea8d510e76a7717303730f7995))
+* stop renewals replacing the DataEdge publish transaction ([bf3fcc2](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/bf3fcc22810d0a64766ed5acf6465848180cf60b))
+
+
+### Changed
+
+* **blockchain:** mark the RPC connection loop's counter as unused ([7b37648](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/7b376487b5ebb0876c55c16d2ead87849d43750f))
+* **deps:** Bump the python-dependencies group with 2 updates ([#157](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/157)) ([a1addfc](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/a1addfcd2850b4d1cec04428e31831c9e4362803))
+* **docker:** merge back-to-back RUN steps in the image build ([97b8290](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/97b8290756cec514ed7c1f56d5d55886050dd852))
+* **docker:** merge back-to-back RUN steps in the image build ([#159](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/159)) ([213a8d5](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/213a8d53ce9406d2affe5b096dd51c8dc7225f7e))
+* **errors:** catch OSError once, not alongside its own subclasses ([9d31300](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/9d3130032960fe210b8f8184e9786e39aa7e9c61))
+* **errors:** drop 2 handlers that only re-raise what they catch ([c0f3681](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c0f36812067a6f70fe39ca03f39d766193eccbb7))
+* **formatter:** split the blank line pass into small named steps ([437800c](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/437800c9595efc0003d321d8a1b92184c52e214c))
+* **formatter:** split the blank line pass into small steps ([#163](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/163)) ([0ed15bd](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/0ed15bd79fa5935f8e81ed22abc36cf7a2189db6))
+* **k8s:** drop the unused API token and bound the pod's scratch disk ([52e7c82](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/52e7c82e8c139b2bb5e878ff55aa0eade6e5145c))
+* **oracle:** mark the Slack success helper as returning nothing ([0067345](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/0067345f28c381f8d2a38b7ed8a101164a896248))
+* **oracle:** split the daily run into a helper per stage ([e6d0d80](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/e6d0d8044505cf382e937532994e0d8a60d98cb9))
+* **pipeline:** name each output CSV file once at the top of the module ([8122b56](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/8122b56aa3483a2b43f2857016c5439caf799a03))
+* **scheduler:** split start-up into a helper per step ([b493403](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/b4934033a3c092b2e4f9ccc5276ac39beaf9ee43))
+* split the daily run and scheduler start-up into steps ([#164](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/164)) ([ef36820](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/ef36820ba089cb977cbb1d6df0929d2b95787b40))
+
+
+### Documentation
+
+* **docker:** state the Python version the base image actually uses ([edb5048](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/edb50486d6b2f5ff304d041db997e48dcaafdb9a))
+
+
+### Tests
+
+* **formatter:** cover functions nested inside other functions ([41a4019](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/41a4019942e6fe0978fccd6b2e168123a904f90e))
+* **formatter:** pin the blank lines added above definitions ([c79696c](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c79696c947bf9734e967491513d75c15c3f172bd))
+* **oracle:** report a cached data failure at its own stage ([a7250a2](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/a7250a2eabee6ebc7fa94f06154bf864f533d383))
+
 ## [0.4.12](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.11...v0.4.12) (2026-09-22)
 
 

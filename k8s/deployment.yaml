@@ -18,7 +18,7 @@ spec:
       automountServiceAccountToken: false
       containers:
       - name: rewards-eligibility-oracle
-        image: ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.4.12 # x-release-please-version
+        image: ghcr.io/graphprotocol/rewards-eligibility-oracle:v0.4.13 # x-release-please-version
         env:
         # Runtime-only configuration (not in config.toml)
         - name: RUN_ON_STARTUP

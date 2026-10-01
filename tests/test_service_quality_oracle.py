@@ -118,6 +118,8 @@ def oracle_context():
         # Cached artifacts default to already published, so a cache hit does not republish them
         mock_pipeline.load_run_metadata.return_value = dict(MOCK_PUBLISHED_RUN_METADATA)
         mock_pipeline.load_daily_metrics_from_csv.return_value = MOCK_DAILY_METRICS_GRID
+        # Yesterday's run published, so a run publishes only its usual overlap
+        mock_pipeline.find_last_published_day.return_value = date.today() - timedelta(days=1)
 
         mock_client = mock_client_cls.return_value
         mock_client.batch_renew_indexer_rewards_eligibility.return_value = (
@@ -577,6 +579,67 @@ def test_main_renews_from_cache_when_the_publish_artifacts_cannot_be_read(oracle
     # Nothing half-read is published, and the skipped retry is alerted on
     ctx["data_edge"].post_payload.assert_not_called()
     assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: DataEdge publish retry skipped"
+
+
+@pytest.mark.parametrize("failing_step", ["write_daily_metrics", "write_run_metadata"])
+def test_main_renews_when_the_daily_metrics_cannot_be_saved(oracle_context, failing_step):
+    """
+    Test that a failure saving the per-day metrics, which only the publish needs, skips the publish
+    rather than failing the run before any eligibility is renewed.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    getattr(ctx["pipeline"], failing_step).side_effect = TypeError(
+        "'<' not supported between instances of 'str' and 'NoneType'"
+    )
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
+        ctx["main"]()
+
+    # Renewals go ahead and the run still succeeds
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_called_once()
+    ctx["circuit_breaker"].record_failure.assert_not_called()
+    ctx["slack"]["notifier"].send_success_notification.assert_called_once()
+
+    # Nothing is published from artifacts that were not saved, and the skip is alerted on
+    ctx["data_edge"].post_payload.assert_not_called()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: daily metrics not saved"
+
+
+@pytest.mark.parametrize(
+    "configured_days, days_since_last_publish, expected_publish_days",
+    [(2, 1, 2), (2, 4, 5), (2, 9, 7), (2, None, 7), (1, 1, 1), (1, 4, 4)],
+    ids=[
+        "usual_overlap",
+        "covers_missed_days",
+        "capped",
+        "no_recent_publish",
+        "single_day_setting",
+        "single_day_setting_covers_missed_days",
+    ],
+)
+def test_main_reaches_back_to_the_last_published_day(
+    oracle_context, configured_days, days_since_last_publish, expected_publish_days
+):
+    """
+    Test that a run publishes every day since the last confirmed publish plus its usual overlap, so a day
+    an earlier run failed to publish is not lost, while a run after a successful one publishes only the
+    configured days. The reach back is capped to bound the payload.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {
+        **MOCK_CONFIG,
+        "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS,
+        "DATA_EDGE_PUBLISH_DAYS": configured_days,
+    }
+    ctx["pipeline"].find_last_published_day.return_value = (
+        None if days_since_last_publish is None else date.today() - timedelta(days=days_since_last_publish)
+    )
+
+    with patch("src.models.rewards_eligibility_oracle.encode_payload") as mock_encode:
+        ctx["main"]()
+
+    assert mock_encode.call_args.kwargs["publish_days"] == expected_publish_days
 
 
 def test_main_does_not_record_an_unconfirmed_publish(oracle_context):

@@ -233,6 +233,12 @@ Publishing an overlap means the next run restates it. The same overlap covers a 
 failed, and a day whose source data arrived late in BigQuery. Rows are keyed by `(indexer, day)` so
 restatement is an upsert.
 
+**Reaching back over failed publishes.** A run whose publish fails still succeeds, so nothing re-runs
+it. Each run therefore adds every day since the last run whose manifest records a confirmed publish
+to its usual overlap, up to 7 days (`MAX_PUBLISH_CATCH_UP_DAYS`, the scheduler's own limit on catching
+up missed runs). With no confirmed publish in the last 7 days, it publishes all 7, around 42 KB at
+200 indexers.
+
 Measured payload sizes, 200 indexers with a full set of counters:
 
 | Encoding | Per run |
@@ -309,18 +315,23 @@ Three properties worth keeping if the format is revised:
 - **Reverts are not retried.** Provider rotation is right for a timeout or an unreachable node, but
   a revert is deterministic: rotating would mine, and pay for, the same failing transaction once per
   configured provider.
-- **An ambiguous broadcast is not retried either.** Once `send_raw_transaction` has returned, the
-  transaction may be mined whatever happens next, so a failed receipt raises `DataEdgePendingError`
-  carrying the hash instead of rotating. Rotating would either duplicate the publish under the next
-  nonce or be rejected as an underpriced replacement, with no way to tell which survived. Failures
-  before the broadcast still rotate normally, since nothing is in flight.
+- **Signed once, sent through each provider in turn.** A send can fail after the node has already
+  accepted the transaction, and signing a fresh one for the next provider would take a new nonce and
+  could publish twice. Resending the same signed bytes cannot: a node that already has them turns
+  them away as a duplicate ("already known"), which counts as sent, and the transaction is then waited
+  on by its hash. "Nonce too low" counts as sent only when the node has the transaction; otherwise
+  another transaction took the nonce, which happens when it was read from a node that was behind, so
+  this one can never be mined and the next provider signs a fresh one. A provider that fails while
+  waiting for the receipt hands over to the next, which resends and confirms the same transaction. A
+  transaction not seen mined within the timeout, or that no provider could confirm, raises
+  `DataEdgePendingError` carrying the hash, since it may still be mined.
 - **Idempotent by `(indexer, day)`** so catch-up runs, the publish overlap, and late-arriving
   BigQuery data can all restate a day.
 - **A cache hit retries an unfinished publish, and only that.** The manifest records `published_tx`
   once a publish is confirmed, so a re-run inside the 30-minute cache window republishes nothing when
-  the artifacts already reached the chain, and publishes them from disk when they did not. Without
-  this a failed publish could never be retried: the natural recovery, re-running the service, takes
-  the cached path, and the day the next run's overlap does not cover would be lost for good. A retry
+  the artifacts already reached the chain, and publishes them from disk when they did not. Re-running
+  the service after a failure takes the cached path, so this is what publishes them the same day
+  rather than leaving them for the next day's run to reach back over. A retry
   publishes under the window and criteria in the manifest, not the current config, since those are
   what produced the grid.
 - **Only a confirmed publish is recorded.** One that was broadcast without its outcome established

@@ -1,6 +1,7 @@
 
         WITH
-        -- Get daily query metrics per indexer, counting each quality bar breached
+        -- Get daily query metrics per indexer, counting each quality bar breached. A latency or
+        -- blocks-behind value that was never recorded is not counted as breaching its bar.
         DailyMetrics AS (
             SELECT
                 day_partition AS day,
@@ -9,8 +10,8 @@
                 SUM(CASE WHEN status = '200 OK' AND response_time_ms < 5000 AND blocks_behind < 50000 THEN 1 ELSE 0 END) AS qualifying_queries,
                 COUNT(DISTINCT CASE WHEN status = '200 OK' AND response_time_ms < 5000 AND blocks_behind < 50000 THEN deployment END) AS qualifying_subgraphs,
                 SUM(CASE WHEN status = '200 OK' THEN 0 ELSE 1 END) AS failed_status,
-                SUM(CASE WHEN response_time_ms < 5000 THEN 0 ELSE 1 END) AS failed_latency,
-                SUM(CASE WHEN blocks_behind < 50000 THEN 0 ELSE 1 END)
+                SUM(CASE WHEN response_time_ms >= 5000 THEN 1 ELSE 0 END) AS failed_latency,
+                SUM(CASE WHEN blocks_behind >= 50000 THEN 1 ELSE 0 END)
                     AS failed_blocks_behind
             FROM
                 test.dataset.table

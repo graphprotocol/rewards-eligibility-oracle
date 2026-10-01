@@ -181,10 +181,13 @@ def encode_payload(
     daily_rows: Sequence[Mapping[str, Any]],
     indexers_evaluated: int,
     indexers_eligible: int,
-    publish_days: int,
+    days: Sequence[date],
 ) -> bytes:
     """
     Encode a run's provenance, criteria and recent per-day metrics into a DataEdge payload.
+
+    The days to publish are chosen by the caller rather than derived here, so that whatever a run
+    records as published is decided in exactly one place and cannot disagree with the payload.
 
     Args:
         run_date: The date of the run
@@ -194,7 +197,7 @@ def encode_payload(
         daily_rows: Per-indexer, per-day metric rows, each carrying 'day', 'indexer' and ROW_FIELDS
         indexers_evaluated: Number of indexers the run considered
         indexers_eligible: Number of indexers the run found eligible
-        publish_days: How many trailing days of the window to publish
+        days: The days to publish, oldest first
 
     Returns:
         bytes: The payload to send as calldata
@@ -224,7 +227,7 @@ def encode_payload(
     for row in daily_rows:
         rows_by_day.setdefault(str(row["day"]), []).append(row)
 
-    for day in select_days_to_publish(window_start, window_end, publish_days):
+    for day in days:
         # Skip indexers routed nothing that day; their absence is what encodes the zero row
         rows = [row for row in rows_by_day.get(day.isoformat(), []) if int(row["query_attempts"]) > 0]
 

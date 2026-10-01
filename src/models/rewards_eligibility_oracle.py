@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import List, NamedTuple, Optional
 
 import pandas as pd
 
@@ -46,6 +46,13 @@ class RunProgress:
         self.stage = "Initialization"
 
 
+class PublishedMetrics(NamedTuple):
+    """A confirmed publish: the transaction, and the days its payload actually carried."""
+
+    tx_url: str
+    days: List[str]
+
+
 class PendingPublication:
     """
     The per-day metrics a run should publish, and the run they describe.
@@ -76,7 +83,7 @@ def publish_daily_metrics_to_data_edge(
     criteria: dict,
     indexers_evaluated: int,
     indexers_eligible: int,
-) -> Optional[str]:
+) -> Optional["PublishedMetrics"]:
     """
     Publish the most recent days of the metrics grid to the DataEdge contract, for a subgraph to index.
 
@@ -97,8 +104,8 @@ def publish_daily_metrics_to_data_edge(
         indexers_eligible: Number of indexers the run found eligible
 
     Returns:
-        Optional[str]: Explorer URL of a confirmed publish, or None if it was skipped, failed, or
-            broadcast without its outcome being established
+        Optional[PublishedMetrics]: The transaction and the days it carried on a confirmed publish, or
+            None if publishing was skipped, failed, or broadcast without its outcome being established
     """
     contract_address = config.get("DATA_EDGE_CONTRACT_ADDRESS")
     if not contract_address:
@@ -106,14 +113,12 @@ def publish_daily_metrics_to_data_edge(
         return None
 
     try:
-        publish_days = _count_days_to_publish(config, pipeline, run_date, window_end)
+        selected_days = _select_days_to_publish(config, pipeline, run_date, window_start, window_end)
 
         # A day with no query attempts at all means its source data has not arrived, not that every
-        # indexer was idle. Such a day is held back rather than published as zeros; the encoder omits
-        # it, and a later run's overlap publishes it once the data is there.
-        days_to_publish = [
-            day.isoformat() for day in select_days_to_publish(window_start, window_end, publish_days)
-        ]
+        # indexer was idle. Such a day is held back rather than published as zeros, and a later run
+        # retries it, because coverage is recorded per day rather than per run.
+        days_to_publish = [day.isoformat() for day in selected_days]
         published_rows = daily_metrics_grid[daily_metrics_grid["day"].isin(days_to_publish)]
         attempts_by_day = published_rows.groupby("day")["query_attempts"].sum()
         days_with_data = [day for day in days_to_publish if attempts_by_day.get(day, 0) > 0]
@@ -134,10 +139,11 @@ def publish_daily_metrics_to_data_edge(
             return None
 
         # Publishing the days that do have data beats publishing none of them, but a day held back
-        # needs to be visible: it is only retried while the window still covers it
+        # needs to be visible, and a day on its last reach before the cap is about to be lost for good
         if len(days_with_data) < len(days_to_publish):
             held_back = [day for day in days_to_publish if day not in days_with_data]
             logger.warning(f"Publishing only {days_with_data}; no query attempts recorded for {held_back}")
+            _alert_on_days_out_of_reach(config, held_back, window_end)
 
         payload = encode_payload(
             run_date=run_date,
@@ -147,7 +153,7 @@ def publish_daily_metrics_to_data_edge(
             daily_rows=daily_metrics_grid.to_dict("records"),
             indexers_evaluated=indexers_evaluated,
             indexers_eligible=indexers_eligible,
-            publish_days=publish_days,
+            days=[day for day in selected_days if day.isoformat() in days_with_data],
         )
 
         data_edge_client = DataEdgeClient(
@@ -158,7 +164,11 @@ def publish_daily_metrics_to_data_edge(
             tx_timeout_seconds=config["TX_TIMEOUT_SECONDS"],
         )
 
-        return data_edge_client.post_payload(payload, config["PRIVATE_KEY"])
+        tx_url = data_edge_client.post_payload(payload, config["PRIVATE_KEY"])
+
+        # The days are returned with the transaction so the manifest records what the payload carried,
+        # rather than implying coverage this run did not achieve
+        return PublishedMetrics(tx_url, days_with_data) if tx_url else None
 
     # The transaction reached the network, so report it as unresolved rather than failed. It is not
     # returned as a confirmed publish: leaving it unrecorded means a later run retries it, and a repeat
@@ -188,24 +198,54 @@ def publish_daily_metrics_to_data_edge(
         return None
 
 
-def _count_days_to_publish(config, pipeline, run_date, window_end) -> int:
+def _alert_on_days_out_of_reach(config, held_back: List[str], window_end: date) -> None:
     """
-    Count the trailing days to publish: every day since the last confirmed publish plus the configured
-    overlap, so days earlier runs failed to publish are covered, up to MAX_PUBLISH_CATCH_UP_DAYS.
+    Alert when a held-back day is on its last chance, since after this run it can never be published.
+
+    A day is retried only while it stays within MAX_PUBLISH_CATCH_UP_DAYS of the run date. The oldest
+    reachable day being held back means the next run cannot reach it, so its metrics are lost for good
+    rather than merely late, and that deserves more than a log line.
+    """
+    last_chance = (window_end - timedelta(days=MAX_PUBLISH_CATCH_UP_DAYS - 1)).isoformat()
+    if last_chance not in held_back:
+        return
+
+    logger.error(f"Day {last_chance} leaves the publishing window unpublished and cannot be recovered")
+    send_opsgenie_alert_safe(
+        api_key=config.get("OPSGENIE_API_KEY"),
+        message="Rewards Oracle: a day will never be published",
+        description=(
+            f"Eligibility renewal was unaffected. {last_chance} still had no query attempts on its "
+            f"last reachable run, so its per-day metrics will not appear on chain."
+        ),
+        priority="P4",
+    )
+
+
+def _select_days_to_publish(config, pipeline, run_date, window_start, window_end) -> List[date]:
+    """
+    Choose the trailing days this run should publish, oldest first.
+
+    Always covers the configured overlap, so the final day is restated once it is complete, and reaches
+    further back to any day within MAX_PUBLISH_CATCH_UP_DAYS that is not yet on chain. Coverage is read
+    per day, so a day an earlier run held back for having no query attempts is retried rather than
+    treated as done because that run published something.
     """
     configured_days = config["DATA_EDGE_PUBLISH_DAYS"]
-    last_published_day = pipeline.find_last_published_day(run_date, MAX_PUBLISH_CATCH_UP_DAYS)
+    already_published = pipeline.find_published_days(run_date, MAX_PUBLISH_CATCH_UP_DAYS)
 
-    # With no confirmed publish in reach, every day back to the cap may be missing from the chain
-    if last_published_day is None:
-        days_needed = MAX_PUBLISH_CATCH_UP_DAYS
-    else:
-        days_needed = min((window_end - last_published_day).days + configured_days - 1, MAX_PUBLISH_CATCH_UP_DAYS)
+    # The furthest back this run is willing to reach, which bounds both cost and catch-up
+    reachable = select_days_to_publish(window_start, window_end, MAX_PUBLISH_CATCH_UP_DAYS)
+    uncovered = [day for day in reachable if day.isoformat() not in already_published]
+
+    # Reach back to the oldest day still missing, but never less than the configured overlap
+    days_needed = (window_end - uncovered[0]).days + 1 if uncovered else configured_days
+    days_needed = min(MAX_PUBLISH_CATCH_UP_DAYS, max(configured_days, days_needed))
 
     if days_needed > configured_days:
         logger.info(f"Publishing {days_needed} days to cover days earlier runs did not publish")
 
-    return min(MAX_PUBLISH_CATCH_UP_DAYS, max(configured_days, days_needed))
+    return select_days_to_publish(window_start, window_end, days_needed)
 
 
 def main(run_date_override: date = None):
@@ -293,7 +333,7 @@ def main(run_date_override: date = None):
             submission_error = e
 
         if publication.grid is not None:
-            published_tx = publish_daily_metrics_to_data_edge(
+            published = publish_daily_metrics_to_data_edge(
                 config=config,
                 pipeline=pipeline,
                 daily_metrics_grid=publication.grid,
@@ -305,9 +345,10 @@ def main(run_date_override: date = None):
                 indexers_eligible=len(eligible_indexers),
             )
 
-            # Only a confirmed publish is recorded, so anything else is retried by a later run
-            if published_tx:
-                pipeline.record_published_transaction(current_run_date, published_tx)
+            # Only a confirmed publish is recorded, and only for the days it actually carried, so a
+            # day held back for want of data is retried by a later run
+            if published:
+                pipeline.record_published_transaction(current_run_date, published.tx_url, published.days)
 
         if submission_error is not None:
             raise submission_error

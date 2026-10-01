@@ -614,12 +614,15 @@ def test_record_published_transaction_marks_the_run_as_published(pipeline: Eligi
         indexers_eligible=1,
     )
 
-    # Act
-    pipeline.record_published_transaction(current_date_val, "https://arbiscan.io/tx/0xabc")
+    # Act: the payload carried two of the days, not the run date alone
+    pipeline.record_published_transaction(
+        current_date_val, "https://arbiscan.io/tx/0xabc", ["2025-01-03", "2025-01-02"]
+    )
 
-    # Assert: the rest of the manifest survives the update
+    # Assert: the days are recorded, sorted, and the rest of the manifest survives the update
     metadata = pipeline.load_run_metadata(current_date_val)
     assert metadata["published_tx"] == "https://arbiscan.io/tx/0xabc"
+    assert metadata["published_days"] == ["2025-01-02", "2025-01-03"]
     assert metadata["indexers_eligible"] == 1
 
 
@@ -632,7 +635,7 @@ def test_record_published_transaction_survives_a_missing_manifest(
     """
     # Act
     with caplog.at_level(logging.ERROR):
-        pipeline.record_published_transaction(date(2025, 1, 3), "https://arbiscan.io/tx/0xabc")
+        pipeline.record_published_transaction(date(2025, 1, 3), "https://arbiscan.io/tx/0xabc", ["2025-01-03"])
 
     # Assert
     assert "Failed to record the published metrics transaction" in caplog.text
@@ -697,8 +700,12 @@ def test_has_existing_processed_data_requires_the_per_day_artifacts(
     assert pipeline.has_existing_processed_data(current_date_val) is True
 
 
-def _write_manifest(pipeline: EligibilityPipeline, run_date: date, published_tx=None) -> None:
-    """Write a run's manifest, recording a confirmed publish when published_tx is given."""
+def _write_manifest(pipeline: EligibilityPipeline, run_date: date, published_tx=None, published_days=None) -> None:
+    """
+    Write a run's manifest, recording a confirmed publish when published_tx is given.
+
+    published_days defaults to the run date alone, which is what a run covers when nothing was held back.
+    """
     pipeline.write_run_metadata(
         current_date=run_date,
         window_start=run_date - timedelta(days=28),
@@ -709,46 +716,86 @@ def _write_manifest(pipeline: EligibilityPipeline, run_date: date, published_tx=
         indexers_eligible=1,
     )
     if published_tx:
-        pipeline.record_published_transaction(run_date, published_tx)
+        days = published_days if published_days is not None else [run_date.isoformat()]
+        pipeline.record_published_transaction(run_date, published_tx, days)
 
 
-def test_find_last_published_day_skips_runs_that_did_not_publish(pipeline: EligibilityPipeline):
+def test_find_published_days_collects_days_across_runs(pipeline: EligibilityPipeline):
     """
-    Tests that the most recent run whose publish was confirmed is found, passing over a later run
-    whose publish failed and a day with no run at all.
+    Tests that coverage is the union of the days earlier runs published, passing over a run whose
+    publish failed and a day with no run at all.
     """
-    # Arrange: published 4 days ago, failed 2 days ago, no run yesterday or 3 days ago
+    # Arrange: a run 5 days ago published two days, a run 4 days ago published one, one failed 2 days ago
     run_date = date(2025, 1, 10)
-    _write_manifest(pipeline, run_date - timedelta(days=5), "https://arbiscan.io/tx/0xolder")
-    _write_manifest(pipeline, run_date - timedelta(days=4), "https://arbiscan.io/tx/0xlatest")
+    _write_manifest(pipeline, run_date - timedelta(days=5), "0xolder", ["2025-01-04", "2025-01-05"])
+    _write_manifest(pipeline, run_date - timedelta(days=4), "0xlatest", ["2025-01-06"])
     _write_manifest(pipeline, run_date - timedelta(days=2))
 
     # Act & Assert
-    assert pipeline.find_last_published_day(run_date, lookback_days=7) == run_date - timedelta(days=4)
+    assert pipeline.find_published_days(run_date, lookback_days=7) == {
+        "2025-01-04",
+        "2025-01-05",
+        "2025-01-06",
+    }
 
 
-def test_find_last_published_day_ignores_the_run_itself_and_runs_past_the_lookback(pipeline: EligibilityPipeline):
+def test_find_published_days_excludes_days_a_run_held_back(pipeline: EligibilityPipeline):
+    """
+    Tests that a day a run held back for having no query attempts is not counted as covered just
+    because that run published something else. Otherwise the held-back day would never be retried.
+    """
+    # Arrange: the run published its own day but held back the day before it
+    run_date = date(2025, 1, 10)
+    _write_manifest(pipeline, run_date - timedelta(days=1), "0xpartial", ["2025-01-09"])
+
+    # Act
+    published = pipeline.find_published_days(run_date, lookback_days=7)
+
+    # Assert
+    assert "2025-01-09" in published
+    assert "2025-01-08" not in published
+
+
+def test_find_published_days_ignores_the_run_itself_and_runs_past_the_lookback(pipeline: EligibilityPipeline):
     """
     Tests that only earlier runs within the lookback count, so a run never treats its own publish as
     already done and an old publish does not stretch the payload past its limit.
     """
     # Arrange
     run_date = date(2025, 1, 10)
-    _write_manifest(pipeline, run_date, "https://arbiscan.io/tx/0xtoday")
-    _write_manifest(pipeline, run_date - timedelta(days=8), "https://arbiscan.io/tx/0xold")
+    _write_manifest(pipeline, run_date, "0xtoday")
+    _write_manifest(pipeline, run_date - timedelta(days=8), "0xold")
 
     # Act & Assert
-    assert pipeline.find_last_published_day(run_date, lookback_days=7) is None
+    assert pipeline.find_published_days(run_date, lookback_days=7) == set()
 
 
-def test_find_last_published_day_passes_over_an_unreadable_manifest(pipeline: EligibilityPipeline):
+def test_find_published_days_falls_back_to_the_run_date_for_older_manifests(pipeline: EligibilityPipeline):
+    """
+    Tests that a manifest written before days were tracked still counts, covering its own run date.
+    That is what the run date was previously taken to mean, so existing manifests are not republished.
+    """
+    # Arrange: a confirmed publish with no recorded days, as earlier versions wrote
+    run_date = date(2025, 1, 10)
+    legacy_run = run_date - timedelta(days=1)
+    _write_manifest(pipeline, legacy_run, "0xlegacy")
+    metadata_path = pipeline.get_date_output_directory(legacy_run) / "run_metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    del metadata["published_days"]
+    metadata_path.write_text(json.dumps(metadata))
+
+    # Act & Assert
+    assert pipeline.find_published_days(run_date, lookback_days=7) == {legacy_run.isoformat()}
+
+
+def test_find_published_days_passes_over_an_unreadable_manifest(pipeline: EligibilityPipeline):
     """Tests that a corrupt manifest counts as a run that did not publish, rather than failing the publish."""
     # Arrange
     run_date = date(2025, 1, 10)
-    _write_manifest(pipeline, run_date - timedelta(days=3), "https://arbiscan.io/tx/0xabc")
+    _write_manifest(pipeline, run_date - timedelta(days=3), "0xabc")
     corrupt_dir = pipeline.get_date_output_directory(run_date - timedelta(days=1))
     corrupt_dir.mkdir(parents=True)
     (corrupt_dir / "run_metadata.json").write_text("{not json")
 
     # Act & Assert
-    assert pipeline.find_last_published_day(run_date, lookback_days=7) == run_date - timedelta(days=3)
+    assert pipeline.find_published_days(run_date, lookback_days=7) == {(run_date - timedelta(days=3)).isoformat()}

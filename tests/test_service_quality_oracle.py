@@ -60,6 +60,7 @@ MOCK_PUBLISHED_RUN_METADATA = {
     "indexers_evaluated": 42,
     "indexers_eligible": 1,
     "published_tx": "https://arbiscan.io/tx/0xalready",
+    "published_days": [date.today().isoformat()],
 }
 
 # Stands in for the grid the pipeline returns, which the oracle publishes without rebuilding it. Dated
@@ -77,6 +78,13 @@ MOCK_DAILY_METRICS_GRID = pd.DataFrame(
         "is_online_day": [1],
     }
 )
+
+
+def reo_module():
+    """Import the oracle module directly, for unit-testing helpers that need no patched dependencies."""
+    import src.models.rewards_eligibility_oracle as reo
+
+    return reo
 
 
 @pytest.fixture
@@ -118,8 +126,10 @@ def oracle_context():
         # Cached artifacts default to already published, so a cache hit does not republish them
         mock_pipeline.load_run_metadata.return_value = dict(MOCK_PUBLISHED_RUN_METADATA)
         mock_pipeline.load_daily_metrics_from_csv.return_value = MOCK_DAILY_METRICS_GRID
-        # Yesterday's run published, so a run publishes only its usual overlap
-        mock_pipeline.find_last_published_day.return_value = date.today() - timedelta(days=1)
+        # Steady state: earlier runs have covered every reachable day up to yesterday
+        mock_pipeline.find_published_days.return_value = {
+            (date.today() - timedelta(days=offset)).isoformat() for offset in range(1, 8)
+        }
 
         mock_client = mock_client_cls.return_value
         mock_client.batch_renew_indexer_rewards_eligibility.return_value = (
@@ -512,7 +522,7 @@ def test_main_retries_publishing_for_a_cached_run_that_never_published(oracle_co
     # The retry is recorded, so a further cache hit does not publish again
     ctx["data_edge"].post_payload.assert_called_once()
     ctx["pipeline"].record_published_transaction.assert_called_once_with(
-        date.today(), "https://arbiscan.io/tx/0xretried"
+        date.today(), "https://arbiscan.io/tx/0xretried", [date.today().isoformat()]
     )
 
 
@@ -607,39 +617,97 @@ def test_main_renews_when_the_daily_metrics_cannot_be_saved(oracle_context, fail
 
 
 @pytest.mark.parametrize(
-    "configured_days, days_since_last_publish, expected_publish_days",
-    [(2, 1, 2), (2, 4, 5), (2, 9, 7), (2, None, 7), (1, 1, 1), (1, 4, 4)],
+    "configured_days, uncovered_offsets, expected_offsets",
+    [
+        (2, [0], [1, 0]),
+        (2, [0, 1], [1, 0]),
+        (2, [0, 3], [3, 2, 1, 0]),
+        (2, list(range(0, 9)), [6, 5, 4, 3, 2, 1, 0]),
+        (1, [0], [0]),
+        (1, [0, 2], [2, 1, 0]),
+    ],
     ids=[
-        "usual_overlap",
-        "covers_missed_days",
-        "capped",
-        "no_recent_publish",
+        "steady_state_publishes_the_overlap",
+        "retries_a_day_an_earlier_run_held_back",
+        "reaches_back_to_the_oldest_uncovered_day",
+        "capped_at_the_catch_up_limit",
         "single_day_setting",
-        "single_day_setting_covers_missed_days",
+        "single_day_setting_still_covers_a_gap",
     ],
 )
-def test_main_reaches_back_to_the_last_published_day(
-    oracle_context, configured_days, days_since_last_publish, expected_publish_days
+def test_select_days_to_publish_covers_every_day_not_yet_on_chain(
+    configured_days, uncovered_offsets, expected_offsets
 ):
     """
-    Test that a run publishes every day since the last confirmed publish plus its usual overlap, so a day
-    an earlier run failed to publish is not lost, while a run after a successful one publishes only the
-    configured days. The reach back is capped to bound the payload.
+    Tests that a run selects the configured overlap plus any reachable day not already on chain, so a
+    day an earlier run held back or failed to publish is retried rather than lost. Offsets count back
+    from the run date, and the reach back is capped to bound the payload.
     """
-    ctx = oracle_context
-    ctx["load_config"].return_value = {
-        **MOCK_CONFIG,
-        "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS,
-        "DATA_EDGE_PUBLISH_DAYS": configured_days,
-    }
-    ctx["pipeline"].find_last_published_day.return_value = (
-        None if days_since_last_publish is None else date.today() - timedelta(days=days_since_last_publish)
+    # Arrange: every reachable day is covered except the given offsets
+    run_date = date(2026, 10, 1)
+    uncovered = {(run_date - timedelta(days=offset)).isoformat() for offset in uncovered_offsets}
+    pipeline = MagicMock()
+    pipeline.find_published_days.return_value = {
+        (run_date - timedelta(days=offset)).isoformat() for offset in range(0, 10)
+    } - uncovered
+
+    # Act
+    selected = reo_module()._select_days_to_publish(
+        {"DATA_EDGE_PUBLISH_DAYS": configured_days},
+        pipeline,
+        run_date,
+        run_date - timedelta(days=28),
+        run_date,
     )
 
-    with patch("src.models.rewards_eligibility_oracle.encode_payload") as mock_encode:
+    # Assert
+    assert selected == [run_date - timedelta(days=offset) for offset in expected_offsets]
+
+
+def test_main_records_only_the_days_the_payload_carried(oracle_context):
+    """
+    Test that a held-back day is not recorded as published just because the run published another day.
+
+    Recording the run date alone would mark the held-back day as covered, and since a run only reaches
+    back over days that are not covered, it would never be retried before leaving the window.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+    ctx["data_edge"].post_payload.return_value = "https://arbiscan.io/tx/0xpartial"
+
+    # The run selects yesterday and today; only today has data, so only today can be published
+    ctx["main"]()
+
+    ctx["pipeline"].record_published_transaction.assert_called_once_with(
+        date.today(), "https://arbiscan.io/tx/0xpartial", [date.today().isoformat()]
+    )
+
+    # The day that was held back is absent, so a later run still sees it as needing publication
+    recorded_days = ctx["pipeline"].record_published_transaction.call_args.args[2]
+    assert (date.today() - timedelta(days=1)).isoformat() not in recorded_days
+
+
+def test_main_alerts_when_a_held_back_day_can_no_longer_be_reached(oracle_context):
+    """
+    Test that a held-back day on its last reachable run raises an alert rather than a log line. After
+    this run it falls outside the catch-up window, so its metrics can never be published.
+    """
+    ctx = oracle_context
+    ctx["load_config"].return_value = {**MOCK_CONFIG, "DATA_EDGE_CONTRACT_ADDRESS": MOCK_DATA_EDGE_ADDRESS}
+
+    # Only the oldest reachable day is still missing, and it has no data in the grid either
+    last_reachable = date.today() - timedelta(days=reo_module().MAX_PUBLISH_CATCH_UP_DAYS - 1)
+    ctx["pipeline"].find_published_days.return_value = {
+        (date.today() - timedelta(days=offset)).isoformat() for offset in range(1, 8)
+    } - {last_reachable.isoformat()}
+
+    with patch("src.models.rewards_eligibility_oracle.send_opsgenie_alert_safe") as mock_alert:
         ctx["main"]()
 
-    assert mock_encode.call_args.kwargs["publish_days"] == expected_publish_days
+    # Today is still published, and the day about to be lost is alerted on
+    ctx["data_edge"].post_payload.assert_called_once()
+    assert mock_alert.call_args.kwargs["message"] == "Rewards Oracle: a day will never be published"
+    assert last_reachable.isoformat() in mock_alert.call_args.kwargs["description"]
 
 
 def test_main_does_not_record_an_unconfirmed_publish(oracle_context):

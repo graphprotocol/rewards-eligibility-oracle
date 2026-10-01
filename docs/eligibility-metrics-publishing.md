@@ -120,7 +120,8 @@ Makes each run's artifact self-describing once criteria have changed:
   "source": "bigquery",
   "indexers_evaluated": 189,
   "indexers_eligible": 142,
-  "published_tx": null
+  "published_tx": null,
+  "published_days": []
 }
 ```
 
@@ -130,6 +131,12 @@ artifacts leaves the manifest of the run that produced them in place rather than
 `published_tx` is `null` until the per-day metrics are confirmed on chain, and is then set to the
 transaction. It is what lets a later run tell a publish that has still to happen from one already
 done, rather than repeating or skipping it blindly.
+
+`published_days` records which days that transaction actually carried, and is the authority on
+coverage. A run publishes only the selected days that had query attempts, so a confirmed publish does
+not imply the run's whole selection reached the chain. Inferring coverage from the run date instead
+would mark a held-back day as done, and because a run only reaches back over days that are *not*
+covered, that day would never be retried before leaving the window.
 
 ### Semantics that consumers must respect
 
@@ -233,11 +240,19 @@ Publishing an overlap means the next run restates it. The same overlap covers a 
 failed, and a day whose source data arrived late in BigQuery. Rows are keyed by `(indexer, day)` so
 restatement is an upsert.
 
-**Reaching back over failed publishes.** A run whose publish fails still succeeds, so nothing re-runs
-it. Each run therefore adds every day since the last run whose manifest records a confirmed publish
-to its usual overlap, up to 7 days (`MAX_PUBLISH_CATCH_UP_DAYS`, the scheduler's own limit on catching
-up missed runs). With no confirmed publish in the last 7 days, it publishes all 7, around 42 KB at
-200 indexers.
+**Reaching back over days not yet on chain.** A run whose publish fails still succeeds, so nothing
+re-runs it. Each run therefore reads the `published_days` of recent manifests and adds any day that is
+missing from that coverage to its usual overlap, up to 7 days (`MAX_PUBLISH_CATCH_UP_DAYS`, the
+scheduler's own limit on catching up missed runs). With nothing covered in the last 7 days, it
+publishes all 7, around 42 KB at 200 indexers.
+
+Coverage is read **per day, not per run**. A run that published only some of its selected days — because
+one had no query attempts — records only those days, so the held-back day stays uncovered and the next
+run selects it again. Treating a confirmed publish as covering everything up to the run date would
+silently lose that day: it is not in the next run's overlap, and it would never be selected again.
+
+A day is retried only while it stays within the 7-day reach. A held-back day on its last reachable run
+can never be published afterwards, so that case alerts (OpsGenie P4) rather than just logging.
 
 Measured payload sizes, 200 indexers with a full set of counters:
 

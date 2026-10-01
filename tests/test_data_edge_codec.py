@@ -145,7 +145,7 @@ def test_payload_round_trips(daily_rows: list):
         daily_rows=daily_rows,
         indexers_evaluated=189,
         indexers_eligible=142,
-        publish_days=2,
+        days=select_days_to_publish(WINDOW_START, WINDOW_END, 2),
     )
     decoded = decode_payload(payload)
 
@@ -188,7 +188,7 @@ def test_encode_payload_omits_indexers_routed_nothing(daily_rows: list):
         daily_rows=daily_rows,
         indexers_evaluated=2,
         indexers_eligible=1,
-        publish_days=2,
+        days=select_days_to_publish(WINDOW_START, WINDOW_END, 2),
     )
     decoded = decode_payload(payload)
 
@@ -212,7 +212,7 @@ def test_encode_payload_omits_a_day_nobody_served():
         daily_rows=[_row("2026-09-25", INDEXER_A)],
         indexers_evaluated=1,
         indexers_eligible=0,
-        publish_days=1,
+        days=select_days_to_publish(WINDOW_START, WINDOW_END, 1),
     )
 
     # Assert
@@ -236,7 +236,7 @@ def test_encode_payload_publishes_only_the_days_that_have_data():
         ],
         indexers_evaluated=1,
         indexers_eligible=1,
-        publish_days=2,
+        days=select_days_to_publish(WINDOW_START, WINDOW_END, 2),
     )
     decoded = decode_payload(payload)
 
@@ -278,7 +278,7 @@ def test_encode_payload_stays_compact(daily_rows: list):
         daily_rows=rows,
         indexers_evaluated=200,
         indexers_eligible=180,
-        publish_days=2,
+        days=select_days_to_publish(WINDOW_START, WINDOW_END, 2),
     )
 
     # Assert: comfortably under 16 KB for 400 published rows
@@ -299,7 +299,7 @@ def test_encode_payload_fails_on_missing_criteria(daily_rows: list):
             daily_rows=daily_rows,
             indexers_evaluated=1,
             indexers_eligible=1,
-            publish_days=1,
+            days=select_days_to_publish(WINDOW_START, WINDOW_END, 1),
         )
 
 
@@ -321,7 +321,7 @@ def test_encode_payload_fails_on_malformed_addresses(indexer: str, expected_erro
             daily_rows=[_row("2026-09-25", indexer, query_attempts=1)],
             indexers_evaluated=1,
             indexers_eligible=0,
-            publish_days=1,
+            days=select_days_to_publish(WINDOW_START, WINDOW_END, 1),
         )
 
 

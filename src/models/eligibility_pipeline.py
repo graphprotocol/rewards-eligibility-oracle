@@ -13,7 +13,7 @@ import shutil
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
@@ -253,6 +253,10 @@ class EligibilityPipeline:
             # Records that the per-day metrics reached the chain, so a later run serving these same
             # artifacts can tell a publish that has still to happen from one already done
             "published_tx": None,
+            # The days that transaction actually carried. A run can publish a subset of the days it
+            # selected, when one of them had no query attempts, so coverage is tracked per day rather
+            # than inferred from the run date; otherwise a held-back day is never retried.
+            "published_days": [],
         }
 
         output_date_dir = self.get_date_output_directory(current_date)
@@ -325,7 +329,7 @@ class EligibilityPipeline:
         return grid
 
 
-    def record_published_transaction(self, current_date: date, tx_url: str) -> None:
+    def record_published_transaction(self, current_date: date, tx_url: str, published_days: List[str]) -> None:
         """
         Record in a date's manifest that its per-day metrics were published on chain.
 
@@ -333,29 +337,46 @@ class EligibilityPipeline:
         that it is retried: the payload is keyed by indexer and day, so a consumer treats a repeat as
         a restatement, whereas an unrecorded loss cannot be recovered once the window moves on.
 
+        The days are recorded individually rather than implied by the run date, because a run publishes
+        only the selected days that had query attempts. Recording the run date alone would mark a
+        held-back day as covered and it would never be retried.
+
         Args:
             current_date: The date whose manifest to update
             tx_url: Explorer URL of the publishing transaction
+            published_days: The days the transaction carried, as 'YYYY-MM-DD' strings
         """
         metadata_path = self.get_date_output_directory(current_date) / RUN_METADATA_FILE
 
         try:
             metadata = self.load_run_metadata(current_date)
             metadata["published_tx"] = tx_url
+            metadata["published_days"] = sorted(published_days)
             metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
-            logger.info(f"Recorded published metrics transaction in: {metadata_path}")
+            logger.info(f"Recorded {len(published_days)} published days in: {metadata_path}")
 
         # The publish itself succeeded, so a manifest that cannot be updated must not fail the run
         except Exception as e:
             logger.error(f"Failed to record the published metrics transaction: {e}", exc_info=True)
 
 
-    def find_last_published_day(self, current_date: date, lookback_days: int) -> Optional[date]:
+    def find_published_days(self, current_date: date, lookback_days: int) -> Set[str]:
         """
-        Find the run date of the latest confirmed publish in the lookback_days before current_date.
+        Collect the days already published on chain by runs in the lookback_days before current_date.
 
-        A run's window ends on its run date, so this is also the last day that publish covered.
+        Coverage is read per day rather than inferred from a run date, because a run publishes only the
+        selected days that had query attempts. A run's own manifest is excluded, since the publish this
+        feeds into has not happened yet.
+
+        Args:
+            current_date: The run date to look back from, exclusive
+            lookback_days: How many days back to read manifests for
+
+        Returns:
+            Set[str]: The 'YYYY-MM-DD' days known to be on chain
         """
+        published_days: Set[str] = set()
+
         for offset in range(1, lookback_days + 1):
             run_date = current_date - timedelta(days=offset)
 
@@ -366,10 +387,18 @@ class EligibilityPipeline:
             except (FileNotFoundError, ValueError):
                 continue
 
-            if metadata.get("published_tx"):
-                return run_date
+            if not metadata.get("published_tx"):
+                continue
 
-        return None
+            # Manifests written before days were tracked only imply their own run date, which is what
+            # the run date was previously taken to mean
+            recorded_days = metadata.get("published_days")
+            if recorded_days:
+                published_days.update(recorded_days)
+            else:
+                published_days.add(run_date.isoformat())
+
+        return published_days
 
 
     def clean_old_date_directories(self, max_age_before_deletion: int) -> None:

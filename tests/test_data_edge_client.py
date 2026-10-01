@@ -5,7 +5,9 @@ Unit tests for the DataEdgeClient.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from web3.exceptions import ContractLogicError, TransactionNotFound
+import requests
+from urllib3.exceptions import MaxRetryError, NewConnectionError
+from web3.exceptions import ContractLogicError, TransactionNotFound, Web3RPCError
 
 from src.models.data_edge_client import (
     FALLBACK_GAS_OVERHEAD,
@@ -54,6 +56,14 @@ def _build_web3(
     w3.to_wei.return_value = 1_000_000_000
 
     return w3
+
+
+def _http_error(status_code: int) -> requests.exceptions.HTTPError:
+    """Build the error an RPC provider raises when it answers with a non-success HTTP status."""
+    response = requests.Response()
+    response.status_code = status_code
+
+    return requests.exceptions.HTTPError(f"{status_code} error", response=response)
 
 
 @pytest.fixture
@@ -251,16 +261,25 @@ class TestPostPayload:
         healthy.eth.send_raw_transaction.assert_called_once()
 
 
+    @pytest.mark.parametrize(
+        "send_error",
+        [
+            Exception("connection reset"),
+            requests.exceptions.ReadTimeout("read timed out"),
+            _http_error(504),
+        ],
+        ids=["unknown", "read_timeout", "gateway_timeout"],
+    )
     def test_post_payload_assumes_an_unanswerable_lookup_was_accepted(
-        self, client: DataEdgeClient, mock_web3: MagicMock
+        self, client: DataEdgeClient, mock_web3: MagicMock, send_error: Exception
     ):
         """
         Tests that a provider which can neither broadcast nor answer whether it holds the transaction
         stops the publish. Treating an accepted transaction as never sent is the costlier mistake.
         """
-        # Arrange: both the send and the follow-up lookup fail
+        # Arrange: both the send and the follow-up lookup fail, and the send may have reached the node
         w3 = _build_web3()
-        w3.eth.send_raw_transaction.side_effect = Exception("connection reset")
+        w3.eth.send_raw_transaction.side_effect = send_error
         w3.eth.get_transaction.side_effect = Exception("provider unreachable")
         mock_web3.return_value = w3
 
@@ -269,6 +288,40 @@ class TestPostPayload:
             client.post_payload(PAYLOAD, PRIVATE_KEY)
 
         mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    @pytest.mark.parametrize(
+        "send_error",
+        [
+            _http_error(429),
+            Web3RPCError("nonce too low"),
+            requests.exceptions.ConnectTimeout("connect timed out"),
+            requests.exceptions.ConnectionError(
+                MaxRetryError(None, "/", reason=NewConnectionError(None, "connection refused"))
+            ),
+        ],
+        ids=["rate_limited", "rpc_error", "connect_timeout", "connection_refused"],
+    )
+    def test_post_payload_rotates_when_a_refused_broadcast_cannot_be_looked_up(
+        self, client: DataEdgeClient, mock_web3: MagicMock, send_error: Exception
+    ):
+        """
+        Tests that a broadcast the provider turned away is retried on the next provider even when the
+        follow-up lookup fails too, as it does on a rate-limited provider. Nothing is in flight.
+        """
+        # Arrange: the send is refused and the lookup fails the same way
+        refusing = _build_web3()
+        refusing.eth.send_raw_transaction.side_effect = send_error
+        refusing.eth.get_transaction.side_effect = send_error
+        healthy = _build_web3()
+        mock_web3.side_effect = [refusing, healthy]
+
+        # Act
+        tx_url = client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert
+        assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+        healthy.eth.send_raw_transaction.assert_called_once()
 
 
     def test_post_payload_still_rotates_on_a_pre_broadcast_failure(

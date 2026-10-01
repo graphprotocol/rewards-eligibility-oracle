@@ -12,9 +12,11 @@ the transactions that renew indexer eligibility, and the two have no shared fail
 import logging
 from typing import List, Optional
 
+import requests
 from hexbytes import HexBytes
+from urllib3.exceptions import NewConnectionError
 from web3 import Web3
-from web3.exceptions import ContractLogicError, TransactionNotFound
+from web3.exceptions import ContractLogicError, TransactionNotFound, Web3RPCError
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,30 @@ class DataEdgePendingError(Exception):
     def __init__(self, message: str, tx_url: str):
         super().__init__(message)
         self.tx_url = tx_url
+
+
+def _broadcast_was_refused(error: Exception) -> bool:
+    """
+    Tell whether a failed broadcast was turned away before the node could accept it.
+
+    A refusal leaves nothing in flight, so another provider can safely be tried. Anything else, such as
+    a timeout or a connection dropped mid-request, may have reached the node before the response was lost.
+    """
+    # The node answered with an error, so it saw the transaction and did not take it
+    if isinstance(error, Web3RPCError):
+        return True
+
+    # The provider rejected the request itself, as with a 429 rate limit, before any node handled it
+    if isinstance(error, requests.exceptions.HTTPError) and error.response is not None:
+        return 400 <= error.response.status_code < 500
+
+    # The connection never opened (timed out or refused), so nothing was sent at all
+    if isinstance(error, requests.exceptions.ConnectTimeout):
+        return True
+
+    reason = getattr(error.args[0], "reason", None) if error.args else None
+
+    return isinstance(error, requests.exceptions.ConnectionError) and isinstance(reason, NewConnectionError)
 
 
 class DataEdgeClient:
@@ -138,20 +164,20 @@ class DataEdgeClient:
         return base_fee, max_priority_fee
 
 
-    def _node_has_transaction(self, w3: Web3, tx_hash: HexBytes) -> bool:
+    def _node_has_transaction(self, w3: Web3, tx_hash: HexBytes, send_error: Exception) -> bool:
         """
         Check whether a node already knows a transaction, to resolve an ambiguous broadcast.
 
-        Defaults to True when the question cannot be answered, since treating an accepted transaction
-        as never sent is the more expensive mistake: the retry would either duplicate the publish under
-        the next nonce or be rejected as an underpriced replacement.
+        If the node cannot say, a refused broadcast counts as not sent so the next provider is tried.
+        Anything else counts as sent, since a retry would duplicate it or be rejected as underpriced.
 
         Args:
             w3: Connected Web3 instance
             tx_hash: Hash of the signed transaction
+            send_error: What the broadcast raised
 
         Returns:
-            bool: True if the node has the transaction, or if it could not be established
+            bool: True if the node has the transaction, or if unknown and the broadcast was not refused
         """
         # Look the transaction up, which answers the question directly when the node responds
         try:
@@ -163,9 +189,15 @@ class DataEdgeClient:
             return False
 
         except Exception as e:
-            logger.warning(f"Could not establish whether 0x{tx_hash.hex().removeprefix('0x')} was sent: {e}")
+            refused = _broadcast_was_refused(send_error)
+            assumption = (
+                "treating it as not sent, since the broadcast was refused" if refused else "assuming it was"
+            )
+            logger.warning(
+                f"Could not establish whether 0x{tx_hash.hex().removeprefix('0x')} was sent ({e}); {assumption}"
+            )
 
-            return True
+            return not refused
 
 
     def _publish_via_provider(self, rpc_url: str, payload: bytes, private_key: str) -> str:
@@ -220,7 +252,7 @@ class DataEdgeClient:
         # The node may have accepted the transaction before the response was lost, so ask whether it
         # did rather than assuming either way
         except Exception as e:
-            if self._node_has_transaction(w3, signed_tx.hash):
+            if self._node_has_transaction(w3, signed_tx.hash, e):
                 raise DataEdgePendingError(
                     f"DataEdge transaction was accepted but the broadcast failed ({e}): {tx_url}", tx_url
                 ) from e

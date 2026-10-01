@@ -315,11 +315,12 @@ Three properties worth keeping if the format is revised:
 - **Reverts are not retried.** Provider rotation is right for a timeout or an unreachable node, but
   a revert is deterministic: rotating would mine, and pay for, the same failing transaction once per
   configured provider.
-- **An ambiguous broadcast is not retried either.** Once `send_raw_transaction` has returned, the
-  transaction may be mined whatever happens next, so a failed receipt raises `DataEdgePendingError`
-  carrying the hash instead of rotating. Rotating would either duplicate the publish under the next
-  nonce or be rejected as an underpriced replacement, with no way to tell which survived. Failures
-  before the broadcast still rotate normally, since nothing is in flight.
+- **Signed once, sent through each provider in turn.** A send can fail after the node has already
+  accepted the transaction, and signing a fresh one for the next provider would take a new nonce and
+  could publish twice. Resending the same signed bytes cannot: a node that already has them turns
+  them away as a duplicate ("already known", or "nonce too low" once mined), which counts as sent, and
+  the transaction is then waited on by its hash. A transaction not seen mined within the timeout
+  raises `DataEdgePendingError` carrying the hash, since it may still be mined.
 - **Idempotent by `(indexer, day)`** so catch-up runs, the publish overlap, and late-arriving
   BigQuery data can all restate a day.
 - **A cache hit retries an unfinished publish, and only that.** The manifest records `published_tx`

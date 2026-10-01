@@ -13,7 +13,7 @@ import logging
 from typing import Any, List, Optional
 
 from web3 import Web3
-from web3.exceptions import ContractLogicError, TransactionNotFound
+from web3.exceptions import ContractLogicError, TimeExhausted, TransactionNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class DataEdgeRevertedError(Exception):
 
 class DataEdgePendingError(Exception):
     """
-    Raised when a publishing transaction was broadcast but was not seen mined in time.
+    Raised when a publishing transaction was sent but not seen mined, in time or through any provider.
 
     It may still be mined, so it is reported as unresolved rather than failed. Carries the
     transaction hash so the outcome can be checked by hand.
@@ -59,6 +59,10 @@ class DataEdgePendingError(Exception):
 
 class NonceAlreadyUsedError(Exception):
     """Raised when another transaction has taken the nonce a publish was signed with, so it can never be mined."""
+
+
+class ReceiptUnavailableError(Exception):
+    """Raised when a provider fails while waiting for a sent transaction, leaving another to confirm it."""
 
 
 def _was_already_sent(error: Exception) -> bool:
@@ -241,15 +245,19 @@ class DataEdgeClient:
 
         logger.info(f"DataEdge payload sent with hash: 0x{tx_hash_hex}")
 
-        # Past the broadcast the transaction may be mined whatever happens next, so a failed receipt
-        # is an unknown outcome rather than a failed publish
+        # Past the broadcast the transaction may be mined whatever happens next, so not seeing it mined
+        # in time is an unknown outcome rather than a failed publish
         try:
             receipt = w3.eth.wait_for_transaction_receipt(signed_tx.hash, self.tx_timeout_seconds)
 
-        except Exception as e:
+        except TimeExhausted as e:
             raise DataEdgePendingError(
                 f"DataEdge transaction broadcast but its outcome is unknown ({e}): {tx_url}", tx_url
             ) from e
+
+        # The provider itself failed, so the next one can resend the same transaction and confirm it
+        except Exception as e:
+            raise ReceiptUnavailableError(f"Could not confirm 0x{tx_hash_hex}: {e}") from e
 
         if receipt["status"] != 1:
             raise DataEdgeRevertedError(f"DataEdge transaction reverted: {tx_url}")
@@ -276,6 +284,7 @@ class DataEdgeClient:
 
         last_error: Optional[Exception] = None
         signed_tx = None
+        sent_tx_url = None
 
         # Sign once and send the same transaction through each provider in turn. A node turns away a
         # repeat of a transaction it already has, so a send whose response was lost can be retried
@@ -298,6 +307,11 @@ class DataEdgeClient:
             except (DataEdgeRevertedError, DataEdgePendingError):
                 raise
 
+            except ReceiptUnavailableError as e:
+                logger.warning(f"Failed to confirm DataEdge payload via {rpc_url}: {e}")
+                last_error = e
+                sent_tx_url = f"{self.block_explorer_url}/tx/0x{signed_tx.hash.hex().removeprefix('0x')}"
+
             # Nothing signed so far can be mined, so the next provider signs afresh with a current nonce
             except NonceAlreadyUsedError as e:
                 logger.warning(f"Failed to publish DataEdge payload via {rpc_url}: {e}")
@@ -307,6 +321,13 @@ class DataEdgeClient:
             except Exception as e:
                 logger.warning(f"Failed to publish DataEdge payload via {rpc_url}: {e}")
                 last_error = e
+
+        # A transaction that was sent may still be mined, so it is unresolved rather than failed
+        if sent_tx_url:
+            raise DataEdgePendingError(
+                f"DataEdge transaction was sent but no provider could confirm it ({last_error}): {sent_tx_url}",
+                sent_tx_url,
+            )
 
         # A failed send may still have reached a node, so name the transaction for checking on chain
         sent_as = ""

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from web3.exceptions import ContractLogicError, RequestTimedOut, TransactionNotFound, Web3RPCError
+from web3.exceptions import ContractLogicError, RequestTimedOut, TimeExhausted, TransactionNotFound, Web3RPCError
 
 from src.models.data_edge_client import (
     FALLBACK_GAS_OVERHEAD,
@@ -200,17 +200,17 @@ class TestPostPayload:
         mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
 
 
-    def test_post_payload_does_not_retry_after_an_ambiguous_broadcast(
+    def test_post_payload_reports_a_transaction_not_mined_in_time_as_unresolved(
         self, client: DataEdgeClient, mock_web3: MagicMock
     ):
         """
-        Tests that a receipt failure after a successful broadcast stops the publish. The transaction
-        may still be mined, so rotating would either duplicate it under the next nonce or be rejected
-        as an underpriced replacement, with no way to tell which survived.
+        Tests that a sent transaction not seen mined within the timeout stops the publish as unresolved
+        rather than failed, since it may still be mined. Waiting again on another provider would only
+        spend another timeout on the same pending transaction.
         """
         # Arrange: the broadcast lands but the receipt never arrives
         w3 = _build_web3()
-        w3.eth.wait_for_transaction_receipt.side_effect = Exception("timed out waiting for receipt")
+        w3.eth.wait_for_transaction_receipt.side_effect = TimeExhausted("timed out waiting for receipt")
         mock_web3.return_value = w3
 
         # Act & Assert
@@ -332,6 +332,50 @@ class TestPostPayload:
         healthy.eth.send_raw_transaction.assert_called_once_with(
             healthy.eth.account.sign_transaction.return_value.raw_transaction
         )
+
+
+    def test_post_payload_confirms_through_the_next_provider_when_one_fails_while_waiting(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a provider failing while it waits for the receipt hands over to the next provider, which
+        resends the same transaction, finds it already known, and confirms it.
+        """
+        # Arrange: the primary sends, then drops the connection while waiting
+        dropping = _build_web3()
+        dropping.eth.wait_for_transaction_receipt.side_effect = requests.exceptions.ConnectionError("dropped")
+        healthy = _build_web3()
+        healthy.eth.send_raw_transaction.side_effect = _rpc_error(-32000, "already known")
+        mock_web3.side_effect = [dropping, healthy]
+
+        # Act
+        tx_url = client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert: confirmed through the backup, for the transaction the primary signed
+        assert tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
+        signed_tx = dropping.eth.account.sign_transaction.return_value
+        assert healthy.eth.wait_for_transaction_receipt.call_args.args[0] == signed_tx.hash
+        healthy.eth.account.sign_transaction.assert_not_called()
+
+
+    def test_post_payload_reports_a_sent_transaction_no_provider_could_confirm_as_unresolved(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a transaction which was sent, but which no provider could then confirm, is reported as
+        unresolved with its hash rather than as a failed publish, since it may still be mined.
+        """
+        # Arrange: every provider fails while waiting
+        mock_web3.return_value = _build_web3()
+        mock_web3.return_value.eth.wait_for_transaction_receipt.side_effect = requests.exceptions.ConnectionError(
+            "dropped"
+        )
+
+        # Act & Assert
+        with pytest.raises(DataEdgePendingError, match="no provider could confirm") as excinfo:
+            client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        assert excinfo.value.tx_url == f"{EXPLORER_URL}/tx/0x{TX_HASH_HEX}"
 
 
     def test_post_payload_fails_when_no_provider_accepts_the_transaction(

@@ -321,8 +321,10 @@ Three properties worth keeping if the format is revised:
   them away as a duplicate ("already known"), which counts as sent, and the transaction is then waited
   on by its hash. "Nonce too low" counts as sent only when the node has the transaction; otherwise
   another transaction took the nonce, which happens when it was read from a node that was behind, so
-  this one can never be mined and the next provider signs a fresh one. A transaction not seen mined
-  within the timeout raises `DataEdgePendingError` carrying the hash, since it may still be mined.
+  this one can never be mined and the next provider signs a fresh one. A provider that fails while
+  waiting for the receipt hands over to the next, which resends and confirms the same transaction. A
+  transaction not seen mined within the timeout, or that no provider could confirm, raises
+  `DataEdgePendingError` carrying the hash, since it may still be mined.
 - **Idempotent by `(indexer, day)`** so catch-up runs, the publish overlap, and late-arriving
   BigQuery data can all restate a day.
 - **A cache hit retries an unfinished publish, and only that.** The manifest records `published_tx`

@@ -1,11 +1,19 @@
-# Builds and releases Docker images. Triggered by version tags (from release-please)
-# or manual workflow dispatch for hotfixes. Builds multi-arch images (amd64/arm64),
-# pushes to GHCR, and creates GitHub releases for manual runs.
+# Builds and releases Docker images. Called by release-please.yml after it creates a release,
+# triggered by version tags pushed by hand, or run manually for hotfixes. Builds multi-arch
+# images (amd64/arm64), pushes to GHCR, and creates GitHub releases for manual runs.
 
 name: CD - Build and Release
 
 on:
-  # Trigger on tags created by release-please
+  # Called by release-please.yml with the tag it just created. Tags pushed by release-please
+  # use GITHUB_TOKEN, and GitHub does not start workflows from GITHUB_TOKEN pushes.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v1.2.3)'
+        required: true
+        type: string
+  # Trigger on version tags pushed by hand
   push:
     tags:
       - 'v*.*.*'
@@ -44,21 +52,29 @@ jobs:
 
       - name: Get version from tag or calculate
         id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          VERSION_TYPE: ${{ github.event.inputs.version_type }}
         run: |
-          # If triggered by tag push, use that tag
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            NEW_VERSION="${GITHUB_REF#refs/tags/}"
+          # Use the tag passed by release-please.yml, else the tag this run was started on
+          TAG="$INPUT_TAG"
+          if [[ -z "$TAG" && "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          if [[ -n "$TAG" ]]; then
+            NEW_VERSION="$TAG"
             echo "Version from tag: $NEW_VERSION"
 
             # Get previous version for changelog
-            PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "$NEW_VERSION" | head -1 || echo "v0.0.0")
-            echo "previous_version=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
-            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vxF "$NEW_VERSION" | head -1 || echo "v0.0.0")
+            echo "previous_version=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
+            echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           else
             # Manual workflow dispatch - calculate version
             LATEST_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "v0.0.0")
             echo "Latest tag: $LATEST_TAG"
-            echo "previous_version=$LATEST_TAG" >> $GITHUB_OUTPUT
+            echo "previous_version=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
             # Extract version components
             VERSION_WITHOUT_V="${LATEST_TAG#v}"
@@ -70,7 +86,7 @@ jobs:
             PATCH=${PATCH:-0}
 
             # Increment based on input
-            case "${{ github.event.inputs.version_type }}" in
+            case "$VERSION_TYPE" in
               major)
                 MAJOR=$((MAJOR + 1))
                 MINOR=0
@@ -87,7 +103,7 @@ jobs:
 
             NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
             echo "New version: $NEW_VERSION"
-            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           fi
 
   build-and-push:
@@ -100,6 +116,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # Build the release tag when called by release-please.yml; empty keeps the default ref
+          ref: ${{ inputs.tag }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -180,7 +199,6 @@ jobs:
         run: |
           # Generate changelog between versions
           PREV_TAG="${{ needs.version.outputs.previous_version }}"
-          NEW_TAG="${{ needs.version.outputs.version }}"
 
           {
             echo "## What's Changed"

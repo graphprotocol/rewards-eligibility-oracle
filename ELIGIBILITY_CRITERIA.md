@@ -36,7 +36,7 @@ Eligibility for indexing rewards is typically refreshed daily via the RewardsEli
 
 ### Where These Criteria Are Enforced
 
-The values above are the ones deployed today. Most are set in [`k8s/configmap.yaml`](./k8s/configmap.yaml): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query that applies them is in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py), which also fixes the 2 values with no config key.
+The values above are the ones deployed today. Most are set in the deployment's `config.toml` (see [`config.toml.example`](./config.toml.example)): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query that applies them is in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py), which also fixes the 2 values with no config key.
 
 | Requirement | Config Key | Deployed Value |
 |-------------|------------|----------------|

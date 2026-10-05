@@ -28,6 +28,3 @@ docker-compose.yml @MoonBoi9001
 
 # CI/CD workflows
 /.github/workflows/ @MoonBoi9001
-
-# Kubernetes configurations
-/k8s/ @MoonBoi9001

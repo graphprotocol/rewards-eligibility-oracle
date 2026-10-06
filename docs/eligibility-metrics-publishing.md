@@ -22,8 +22,8 @@ That leaves indexers with a single bit of information, and it is the wrong bit:
 - An ineligible indexer learns that it failed, not why. "No queries were routed to me" and
   "I served queries but every one was behind chainhead" are different problems with different
   fixes, and the contract shows them the same way.
-- `MIN_SUBGRAPHS` changes from 1 to 5 on 2026-10-06. No indexer can currently determine whether
-  that affects them, which makes the notice period much less useful than intended.
+- `MIN_SUBGRAPHS` changed from 1 to 5 on 2026-10-06. No indexer could determine beforehand whether
+  that affected them, which made the notice period much less useful than intended.
 
 ## Goal
 
@@ -502,7 +502,7 @@ rolling aggregates. Two traps:
   Until those days roll out of the window, a naive sum of stored `is_online_day` disagrees with the
   oracle's verdict. Store the counters and recompute online days against the latest `Criteria`:
   - `MIN_SUBGRAPHS` and `MIN_ONLINE_DAYS` changes can be recomputed exactly from
-    `qualifying_queries` and `qualifying_subgraphs`. This matters immediately: `MIN_SUBGRAPHS` goes
+    `qualifying_queries` and `qualifying_subgraphs`. This matters already: `MIN_SUBGRAPHS` went
     from 1 to 5 on 2026-10-06.
   - `MAX_LATENCY_MS` and `MAX_BLOCKS_BEHIND` changes cannot be, because they change what counts as a
     qualifying query. Days published before such a change stay approximate until they leave the

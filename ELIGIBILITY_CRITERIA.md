@@ -29,7 +29,7 @@ The following criteria are used to identify indexers that should be eligible to 
   - Query Response Latency: **< 5,000 ms**.
   - Query Freshness: **< 50,000 blocks** behind chainhead.
 
-Eligibility for indexing rewards is typically refreshed daily via the RewardsEligibilityOracle contract.
+Eligibility for indexing rewards is typically refreshed daily via the RewardsEligibilityOracle contract. Each daily run checks every day in the 28 day window against the criteria active on the day of the run, so a change to the criteria also applies to the earlier days still in that window.
 
 > **Note**:
 > Once an indexer has successfully qualified for indexing rewards by satisfying the active eligibility criteria, and a corresponding transaction has been submitted on chain by an authorized Oracle into the RewardsEligibilityOracle contract, the now eligible indexer can continue claiming indexing rewards from the protocol for the duration of the qualification period (default is 14 days), even if the active eligibility criteria change.

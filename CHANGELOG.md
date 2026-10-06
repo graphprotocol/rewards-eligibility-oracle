@@ -5,6 +5,22 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.14](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.13...v0.4.14) (2026-10-06)
+
+
+### Changed
+
+* build the Docker image whenever a release is created ([#172](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/172)) ([d3df62a](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/d3df62ab6d484c73de0ce872fee604de7f94ffb9))
+* **config:** set the example subgraph minimum to 5 to match production ([fc6f494](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/fc6f494d66334b0d00e4cbfff910542c86428df3))
+* remove deprecated k8s configuration files ([73e33e4](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/73e33e45248e706534b42507977977bbf6adc8a4))
+
+
+### Documentation
+
+* **criteria:** explain that a criteria change covers the whole window ([498d7d4](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/498d7d46e81b78427ec53671b8623e4173af3390))
+* **criteria:** mark the 5 subgraph daily minimum as active ([b81e8ab](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/b81e8ab4c72bbd928245d816f95db9ccb707d077))
+* **publishing:** describe the 5 subgraph minimum as already in force ([8573f87](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/8573f87cd04c0a0d9110e02d4c726bc8170e42a2))
+
 ## [0.4.13](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.12...v0.4.13) (2026-10-01)
 
 

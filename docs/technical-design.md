@@ -37,7 +37,7 @@ graph TB
             end
 
             subgraph PROCESSING["Eligibility Processing"]
-                ApplyCriteria["Apply Criteria e.g.<br/>5+ days online<br/>Latency < 5000ms<br/>Blocks behind < 50000<br/>1+ subgraph served"]
+                ApplyCriteria["Apply Criteria e.g.<br/>5+ days online<br/>Latency < 5000ms<br/>Blocks behind < 50000<br/>10+ subgraphs served"]
                 FilterData["Filter Eligible<br/>vs Ineligible"]
                 GenArtifacts["Generate CSV Artifacts:<br/>- eligible_indexers.csv<br/>- ineligible_indexers.csv<br/>- full_metrics.csv"]
             end

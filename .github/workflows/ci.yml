@@ -13,9 +13,6 @@ on:
 permissions:
   contents: read
 
-env:
-  PYTHON_VERSION: "3.14.7"
-
 jobs:
   # =============================================================================
   # CODE QUALITY & BUILD VALIDATION
@@ -30,7 +27,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version-file: .python-version
 
       - name: Cache dependencies
         uses: actions/cache@v6

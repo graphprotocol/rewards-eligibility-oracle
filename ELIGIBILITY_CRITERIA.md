@@ -10,10 +10,38 @@ This document defines the requirements an Indexer must meet to be eligible for i
 
 | Upcoming Requirement | Justification | Date Requirement Will Be Updated/Introduced (YYYY-MM-DD) |
 |----------------------|---------------|----------------------------------------------------------|
-| **Example Requirement:** | This is a placeholder for future criteria. Watch this space to stay informed. We will also announce upcoming requirements via official channels. | `YYYY-MM-DD` |
+| **Subgraph Coverage:** The daily subgraph minimum will scale with each indexer's total stake. To be active, an indexer must serve at least 1 qualifying query on each of at least **10 subgraphs**, or **1 subgraph per 4M GRT** of total stake (rounded up), whichever is greater. Only indexers with more than **40M GRT** of total stake will need more than 10. Total stake is the GRT the indexer has provisioned to the SubgraphService plus the GRT delegated to that provision. Indexers still need **5+ active days** in a given **28 day** period. From that date, each daily run checks every day still in the 28 day window against the indexer's new minimum, including days before 2026-11-17. See [How the Stake-Scaled Subgraph Minimum Will Work](#how-the-stake-scaled-subgraph-minimum-will-work) for the formula, examples and the long-term target. | Indexing rewards depend on stake, so the indexers that receive the most rewards should do the most work. | 2026-11-17 |
 
 > **Note**:
 > We will typically allow a 14 day window after announcing a change before it goes live.
+
+### How the Stake-Scaled Subgraph Minimum Will Work
+
+From 2026-11-17, the number of subgraphs an indexer must serve each day for that day to count as active is:
+
+```text
+required subgraphs = the greater of 10, or (total stake / 4M GRT) rounded up
+```
+
+In words, divide the indexer's total stake by 4M GRT and round up to a whole number of subgraphs. If the result is below 10, the minimum stays at 10. An indexer with exactly 40M GRT still needs 10 subgraphs, while one with 41M GRT needs 11.
+
+Total stake is the GRT the indexer has provisioned to the SubgraphService plus the GRT delegated to that provision. GRT the indexer has staked but not provisioned to the SubgraphService does not count. The oracle reads each indexer's total stake once at every daily run and applies the resulting minimum to every day in the 28 day window, so a change in stake changes the minimum from the next run.
+
+The count is of subgraphs the indexer **serves qualifying queries on**, not subgraphs it has synced. Not every synced subgraph receives queries every day, so plan sync capacity with headroom above your number.
+
+This is the first step towards a target of **1 qualifying subgraph per 1M GRT** of total stake, keeping the minimum of 10. Each later step will be announced in the table above separately, with at least 14 days' notice and the data from the step before it.
+
+Today every indexer needs 10 subgraphs. The examples below show the requirement from 2026-11-17 and at the long-term target.
+
+| Total stake | Required from 2026-11-17 | Required at the long-term target (1 per 1M GRT) |
+|-------------|--------------------------|-------------------------------------------------|
+| 10M GRT | 10 / 4 = 2.5, rounded up to 3, so the minimum of 10 applies | 10 |
+| 30M GRT | 30 / 4 = 7.5, rounded up to 8, so the minimum of 10 applies | 30 |
+| 40M GRT | 40 / 4 = 10 | 40 |
+| 41M GRT | 41 / 4 = 10.25, rounded up to 11 | 41 |
+| 50M GRT | 50 / 4 = 12.5, rounded up to 13 | 50 |
+| 100M GRT | 100 / 4 = 25 | 100 |
+| 200M GRT | 200 / 4 = 50 | 200 |
 
 ---
 

@@ -5,7 +5,11 @@ Unit tests for the Scheduler, organized for clarity and complete coverage.
 import sys
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, mock_open, patch
+
+# Reach call through the mock module: a module-level call sends pytest 9.2 collection down an endless
+# __wrapped__ chain, which py_ecc's raised recursion limit lets grow until memory runs out
+from unittest import mock
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 from tenacity import wait_fixed
@@ -402,7 +406,7 @@ class TestSchedulerRunLoop:
         scheduler.run()
 
         assert mock_dependencies.schedule.run_pending.call_count == 3
-        mock_dependencies.time.sleep.assert_has_calls([call(60), call(60)])
+        mock_dependencies.time.sleep.assert_has_calls([mock.call(60), mock.call(60)])
         assert scheduler.update_healthcheck.call_count == 2
         mock_dependencies.logger.info.assert_any_call("Scheduler stopped by user")
 

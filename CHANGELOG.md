@@ -5,6 +5,19 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.15](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.14...v0.4.15) (2026-11-03)
+
+
+### Changed
+
+* **ci:** run CI on Python 3.14 so it works on Ubuntu 26.04 ([#187](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/187)) ([7056a13](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/7056a1327aca9eec9c2413aa726836219e4300ef))
+* **deps:** Bump types-requests from 2.33.0.20260906 to 2.33.0.20261030 ([#185](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/185)) ([d50909f](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/d50909fb72e7aa21b8e464dabaf93b001b94c774))
+
+
+### Documentation
+
+* announce stake-scaled subgraph minimum from 2026-11-17 ([#186](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/186)) ([88fb34c](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/88fb34c13a83e854466518564a3e3c308a71f0fa))
+
 ## [0.4.14](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.13...v0.4.14) (2026-10-27)
 
 

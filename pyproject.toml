@@ -20,8 +20,8 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.ruff.lint]
-# Enable rules including isort (I) for import sorting and additional fixes
-select = ["E", "W", "F", "I"]
+# Enable rules including isort (I) for import sorting and additional fixes, and TID253 for banned imports
+select = ["E", "W", "F", "I", "TID253"]
 
 # Exclude a variety of commonly ignored directories.
 exclude = [
@@ -42,6 +42,11 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # Ignore E402 (import not at top) in scripts and specific modules
 "scripts/test_*.py" = ["E402"]
 "src/models/rewards_eligibility_oracle.py" = ["E402"]
+
+# A module-level call sends pytest 9.2 collection down an endless __wrapped__ chain that py_ecc's raised
+# recursion limit lets grow until memory runs out, so tests must import it inside the test that uses it
+[tool.ruff.lint.flake8-tidy-imports]
+banned-module-level-imports = ["unittest.mock.call"]
 
 # Use unsafe fixes to address typing and other modernization issues
 [tool.ruff.lint.isort]

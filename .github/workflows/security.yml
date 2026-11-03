@@ -30,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13.7"
+          python-version-file: .python-version
 
       - name: Scan dependencies
         run: |
@@ -50,7 +50,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13.7"
+          python-version-file: .python-version
 
       - name: Run security analysis
         run: |

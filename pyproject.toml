@@ -1,7 +1,5 @@
-# This file is used to configure project settings and tools for the Rewards Eligibility Oracle project.
-# It defines configurations for linting, formatting, and other development tools to maintain code quality
-# and consistency across the project. Specifically, it sets up rules for Ruff, a fast Python linter and
-# formatter, to enforce coding standards, manage import sorting, and handle code complexity.
+# Settings for the Rewards Eligibility Oracle's development tools, chiefly Ruff, the Python linter and
+# formatter, which enforces coding standards, import sorting and complexity limits.
 
 [tool.ruff]
 # Allow line lengths up to 115 characters. 

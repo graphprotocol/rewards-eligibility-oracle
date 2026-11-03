@@ -31,7 +31,7 @@ The count is of subgraphs the indexer **serves qualifying queries on**, not subg
 
 This is the first step towards a target of **1 qualifying subgraph per 1M GRT** of total stake, keeping the minimum of 10. Each later step will be announced in the table above separately, with at least 14 days' notice and the data from the step before it.
 
-Today every indexer needs 10 subgraphs. The examples below show the requirement from 2026-11-17 and at the long-term target.
+Until 2026-11-17 every indexer needs 10 subgraphs. The examples below show the requirement from 2026-11-17 and at the long-term target.
 
 | Total stake | Required from 2026-11-17 | Required at the long-term target (1 per 1M GRT) |
 |-------------|--------------------------|-------------------------------------------------|

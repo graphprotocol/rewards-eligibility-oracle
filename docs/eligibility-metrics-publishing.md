@@ -22,8 +22,9 @@ That leaves indexers with a single bit of information, and it is the wrong bit:
 - An ineligible indexer learns that it failed, not why. "No queries were routed to me" and
   "I served queries but every one was behind chainhead" are different problems with different
   fixes, and the contract shows them the same way.
-- `MIN_SUBGRAPHS` changed from 5 to 10 on 2026-10-27. No indexer could determine beforehand whether
-  that affected them, which made the notice period much less useful than intended.
+- The subgraph minimum rose from 5 to 10 on 2026-10-27 and began scaling with stake on 2026-11-17.
+  No indexer could determine beforehand whether that affected them, which made the notice period
+  much less useful than intended.
 
 ## Goal
 
@@ -182,9 +183,10 @@ These apply to the CSV and to the on-chain payload alike.
    [Wire format](#wire-format)).
 4. **`is_online_day` is a historical record** computed with the thresholds of the run that produced
    it. To simulate other thresholds, recompute from `qualifying_queries` and `qualifying_subgraphs`.
-   This works exactly for `MIN_SUBGRAPHS` and `MIN_ONLINE_DAYS`. It cannot work for
-   `MAX_LATENCY_MS` or `MAX_BLOCKS_BEHIND`, because those decide what counts as qualifying in the
-   first place.
+   This works exactly for `MIN_SUBGRAPHS` and `MIN_ONLINE_DAYS`, except for an indexer whose stake
+   puts its required count above `MIN_SUBGRAPHS`, since the payload does not yet carry that count.
+   It cannot work for `MAX_LATENCY_MS` or `MAX_BLOCKS_BEHIND`, because those decide what counts as
+   qualifying in the first place.
 
 ### Evaluated indexers are those with at least one attempt
 
@@ -507,7 +509,8 @@ rolling aggregates. Two traps:
   oracle's verdict. Store the counters and recompute online days against the latest `Criteria`:
   - `MIN_SUBGRAPHS` and `MIN_ONLINE_DAYS` changes can be recomputed exactly from
     `qualifying_queries` and `qualifying_subgraphs`. This matters already: `MIN_SUBGRAPHS` went
-    from 5 to 10 on 2026-10-27.
+    from 5 to 10 on 2026-10-27. Since 2026-11-17 it is exact only for indexers whose stake keeps
+    them at `MIN_SUBGRAPHS`, until the payload carries each indexer's required count.
   - `MAX_LATENCY_MS` and `MAX_BLOCKS_BEHIND` changes cannot be, because they change what counts as a
     qualifying query. Days published before such a change stay approximate until they leave the
     window. Expose the criteria each day was published under so consumers can tell.
@@ -559,7 +562,7 @@ itself; the subgraph is the source of truth for the metrics behind it.
 | Decay warning | qualifying days about to roll off the back of the window |
 | Window strip | `is_online_day` per day, with the partial day marked |
 | Failure reason | `query_attempts == 0` -> not routed; else the dominant `failed_*`; all `failed_*` zero -> missing latency or chainhead data |
-| Criteria simulator | re-tally `qualifying_queries >= 1 AND qualifying_subgraphs >= K` for pending `K` (`MIN_SUBGRAPHS` only) |
+| Criteria simulator | re-tally `qualifying_queries >= 1 AND qualifying_subgraphs >= K` for pending `K` (`MIN_SUBGRAPHS` only, and exact only for indexers whose stake keeps them at it) |
 | Run health / data as-of | latest `Run` entity |
 
 Two states worth rendering explicitly:

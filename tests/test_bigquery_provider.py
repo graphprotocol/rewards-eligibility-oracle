@@ -209,7 +209,7 @@ class TestGetIndexerDailyMetricsQuery:
         )
         connection.executemany("INSERT INTO query_logs VALUES (?, ?, ?, ?, ?, ?)", rows)
         query = provider._get_indexer_daily_metrics_query(start_date=START_DATE, end_date=START_DATE)
-        daily_metrics = pd.read_sql_query(query, connection)
+        daily_metrics = provider.mark_online_days(pd.read_sql_query(query, connection))
         connection.close()
 
         result = provider.aggregate_daily_metrics(daily_metrics).set_index("indexer")
@@ -251,7 +251,7 @@ class TestGetIndexerDailyMetricsQuery:
         )
         connection.executemany("INSERT INTO query_logs VALUES (?, ?, ?, ?, ?, ?)", rows)
         query = provider._get_indexer_daily_metrics_query(start_date=START_DATE, end_date=START_DATE)
-        result = pd.read_sql_query(query, connection).set_index("indexer")
+        result = provider.mark_online_days(pd.read_sql_query(query, connection)).set_index("indexer")
         connection.close()
 
         assert result.loc["0xmixed", "query_attempts"] == 3
@@ -322,6 +322,120 @@ class TestGetIndexerDailyMetricsQuery:
         assert isinstance(query, str)
         assert invalid_start_date.strftime("%Y-%m-%d") in query
         assert invalid_end_date.strftime("%Y-%m-%d") in query
+
+
+class TestMarkOnlineDays:
+    """Tests for the mark_online_days method."""
+
+
+    @staticmethod
+    def _daily_metrics(rows):
+        """Build per-day metrics from (indexer, qualifying_queries, qualifying_subgraphs) tuples."""
+        return pd.DataFrame(
+            {
+                "day": ["2025-01-01"] * len(rows),
+                "indexer": [indexer for indexer, _, _ in rows],
+                "qualifying_queries": [queries for _, queries, _ in rows],
+                "qualifying_subgraphs": [subgraphs for _, _, subgraphs in rows],
+            }
+        )
+
+
+    def test_mark_online_days_applies_min_subgraphs_to_every_indexer_by_default(self, mock_bpd: MagicMock):
+        """
+        Tests that without per-indexer counts a day is online exactly when the indexer served qualifying
+        queries on at least min_subgraphs subgraphs.
+        """
+        provider = BigQueryProvider(
+            project=MOCK_PROJECT,
+            location=MOCK_LOCATION,
+            table_name=MOCK_TABLE_NAME,
+            min_online_days=MOCK_MIN_ONLINE_DAYS,
+            min_subgraphs=10,
+            max_latency_ms=MOCK_MAX_LATENCY_MS,
+            max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
+        )
+        daily_metrics = self._daily_metrics([("0xbelow", 50, 9), ("0xexact", 50, 10), ("0xabove", 50, 11)])
+
+        result = provider.mark_online_days(daily_metrics).set_index("indexer")
+
+        assert result.loc["0xbelow", "is_online_day"] == 0
+        assert result.loc["0xexact", "is_online_day"] == 1
+        assert result.loc["0xabove", "is_online_day"] == 1
+        assert result["is_online_day"].dtype == "int64"
+
+
+    def test_mark_online_days_needs_a_qualifying_query_even_when_no_subgraphs_are_required(
+        self, mock_bpd: MagicMock
+    ):
+        """
+        Tests that a day with no qualifying query is never online, even under a minimum of 0 subgraphs.
+        """
+        provider = BigQueryProvider(
+            project=MOCK_PROJECT,
+            location=MOCK_LOCATION,
+            table_name=MOCK_TABLE_NAME,
+            min_online_days=MOCK_MIN_ONLINE_DAYS,
+            min_subgraphs=0,
+            max_latency_ms=MOCK_MAX_LATENCY_MS,
+            max_blocks_behind=MOCK_MAX_BLOCKS_BEHIND,
+        )
+        daily_metrics = self._daily_metrics([("0xidle", 0, 0), ("0xserving", 1, 1)])
+
+        result = provider.mark_online_days(daily_metrics).set_index("indexer")
+
+        assert result.loc["0xidle", "is_online_day"] == 0
+        assert result.loc["0xserving", "is_online_day"] == 1
+
+
+    def test_mark_online_days_applies_each_indexers_own_count_when_given(self, provider: BigQueryProvider):
+        """
+        Tests that per-indexer counts replace min_subgraphs, so the same day can be online for one
+        indexer and not for another that served the same number of subgraphs.
+        """
+        daily_metrics = self._daily_metrics([("0xsmall", 50, 12), ("0xlarge", 50, 12)])
+
+        result = provider.mark_online_days(daily_metrics, required_subgraphs={"0xsmall": 10, "0xlarge": 13})
+        result = result.set_index("indexer")
+
+        assert result.loc["0xsmall", "is_online_day"] == 1
+        assert result.loc["0xlarge", "is_online_day"] == 0
+
+
+    def test_mark_online_days_refuses_counts_that_miss_an_indexer(self, provider: BigQueryProvider):
+        """
+        Tests that per-indexer counts which leave an indexer out raise, rather than quietly judging that
+        indexer against a different minimum.
+        """
+        daily_metrics = self._daily_metrics([("0xcovered", 50, 12), ("0xmissing", 50, 12)])
+
+        with pytest.raises(ValueError, match="0xmissing"):
+            provider.mark_online_days(daily_metrics, required_subgraphs={"0xcovered": 10})
+
+
+    def test_mark_online_days_leaves_the_input_unchanged(self, provider: BigQueryProvider):
+        """
+        Tests that the online flag is added to a copy, so the caller's frame keeps its original columns.
+        """
+        daily_metrics = self._daily_metrics([("0xindexer", 1, 1)])
+
+        provider.mark_online_days(daily_metrics)
+
+        assert "is_online_day" not in daily_metrics.columns
+
+
+    @pytest.mark.parametrize("has_columns", [True, False])
+    def test_mark_online_days_adds_the_column_to_an_empty_window(self, provider: BigQueryProvider, has_columns):
+        """
+        Tests that a window with no rows still gains the column the daily metrics grid validates against,
+        whether or not the empty result kept the query's columns.
+        """
+        daily_metrics = self._daily_metrics([]) if has_columns else pd.DataFrame()
+
+        result = provider.mark_online_days(daily_metrics)
+
+        assert result.empty
+        assert "is_online_day" in result.columns
 
 
 class TestAggregateDailyMetrics:

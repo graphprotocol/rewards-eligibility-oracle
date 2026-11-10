@@ -33,8 +33,7 @@
             GROUP BY
                 indexer
         )
-        -- Per-day rows, flagging the days that count as online (>= 1 qualifying query on each of
-        -- >= 1 subgraphs)
+        -- Per-day rows, with the window's distinct subgraph count repeated on each
         SELECT
             m.day,
             m.indexer,
@@ -44,9 +43,6 @@
             m.failed_status,
             m.failed_latency,
             m.failed_blocks_behind,
-            CASE WHEN m.qualifying_queries >= 1 AND m.qualifying_subgraphs >= 1
-                THEN 1 ELSE 0
-            END AS is_online_day,
             u.unique_good_response_subgraphs
         FROM
             DailyMetrics m

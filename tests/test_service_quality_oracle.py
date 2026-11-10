@@ -185,6 +185,14 @@ def test_main_succeeds_on_happy_path(oracle_context):
     ctx["bq_provider_cls"].assert_called_once()
     ctx["bq_provider"].fetch_indexer_daily_metrics.assert_called_once()
 
+    # The online days are marked on the fetched rows, and both the summary and the grid use the marked rows
+    marked = ctx["bq_provider"].mark_online_days.return_value
+    ctx["bq_provider"].mark_online_days.assert_called_once_with(
+        ctx["bq_provider"].fetch_indexer_daily_metrics.return_value
+    )
+    ctx["bq_provider"].aggregate_daily_metrics.assert_called_once_with(marked)
+    assert ctx["pipeline"].write_daily_metrics.call_args.kwargs["daily_metrics"] is marked
+
     ctx["pipeline_cls"].assert_called_once()
     ctx["pipeline"].process.assert_called_once()
     ctx["pipeline"].clean_old_date_directories.assert_called_once_with(MOCK_CONFIG["MAX_AGE_BEFORE_DELETION"])

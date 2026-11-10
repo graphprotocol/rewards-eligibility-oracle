@@ -1297,3 +1297,132 @@ class TestProviderRejectionRotation:
 
         # 1 call per provider in the 2-provider pool
         assert mock_func.call_count == 2
+
+
+class TestStakeReads:
+    """Tests for reading each indexer's total stake and the delegation ratio from the chain."""
+
+    STAKING_ADDRESS = "0x" + "5" * 40
+    SUBGRAPH_SERVICE_ADDRESS = "0x" + "6" * 40
+
+
+    @staticmethod
+    def _connected_w3(block_number: int, delegation_ratio: int) -> MagicMock:
+        """A connected provider at block_number whose SubgraphService reports delegation_ratio."""
+        w3 = MagicMock()
+        w3.is_connected.return_value = True
+        w3.eth.block_number = block_number
+        w3.eth.contract.return_value.functions.getDelegationRatio.return_value.call.return_value = delegation_ratio
+        return w3
+
+
+    def test_read_delegation_ratio_reads_the_subgraph_service(self, blockchain_client: BlockchainClient):
+        """
+        Tests that the delegation ratio is read from the SubgraphService address given, at the latest block.
+        """
+        functions = blockchain_client.w3.eth.contract.return_value.functions
+        functions.getDelegationRatio.return_value.call.return_value = 16
+
+        ratio = blockchain_client.read_delegation_ratio(self.SUBGRAPH_SERVICE_ADDRESS)
+
+        assert ratio == 16
+        assert blockchain_client.w3.eth.contract.call_args.kwargs["address"] == self.SUBGRAPH_SERVICE_ADDRESS
+        functions.getDelegationRatio.return_value.call.assert_called_once_with(block_identifier="latest")
+
+
+    def test_read_total_stake_reads_every_indexer_at_one_block(self, blockchain_client: BlockchainClient):
+        """
+        Tests that the ratio and every indexer's stake are read at the same block, a little behind the
+        head so every provider has it, with each indexer's stake asked under the ratio read on chain.
+        """
+        w3 = blockchain_client.w3
+        w3.eth.block_number = 5_000
+        functions = w3.eth.contract.return_value.functions
+        functions.getDelegationRatio.return_value.call.return_value = 16
+        stake = {"0xsmall": 9 * 10**24, "0xlarge": 145 * 10**24}
+        functions.getTokensAvailable.side_effect = lambda indexer, verifier, ratio: MagicMock(
+            call=MagicMock(return_value=stake[indexer])
+        )
+
+        snapshot = blockchain_client.read_total_stake(
+            ["0xsmall", "0xlarge"], self.STAKING_ADDRESS, self.SUBGRAPH_SERVICE_ADDRESS
+        )
+
+        assert snapshot.block_number == 4_950
+        assert snapshot.delegation_ratio == 16
+        assert snapshot.stake_by_indexer == stake
+        functions.getDelegationRatio.return_value.call.assert_called_once_with(block_identifier=4_950)
+        for indexer in stake:
+            functions.getTokensAvailable.assert_any_call(indexer, self.SUBGRAPH_SERVICE_ADDRESS, 16)
+
+
+    def test_read_total_stake_keys_stake_by_the_indexer_strings_given(
+        self, blockchain_client: BlockchainClient, mock_w3
+    ):
+        """
+        Tests that stake comes back under the indexer strings the caller passed, even though the chain is
+        asked with checksummed addresses, so the caller can look indexers up as it knows them.
+        """
+        mock_w3.to_checksum_address.side_effect = lambda address: address.upper()
+        functions = blockchain_client.w3.eth.contract.return_value.functions
+        functions.getDelegationRatio.return_value.call.return_value = 16
+        functions.getTokensAvailable.return_value.call.return_value = 10**18
+
+        snapshot = blockchain_client.read_total_stake(
+            ["0xabc"], self.STAKING_ADDRESS, self.SUBGRAPH_SERVICE_ADDRESS
+        )
+
+        assert snapshot.stake_by_indexer == {"0xabc": 10**18}
+        functions.getTokensAvailable.assert_called_once_with("0XABC", self.SUBGRAPH_SERVICE_ADDRESS.upper(), 16)
+
+
+    def test_read_total_stake_moves_to_the_next_provider_when_one_is_rate_limited(
+        self, mock_w3, mock_slack, mock_file, mocker: MockerFixture
+    ):
+        """
+        Tests that a provider answering 429 partway through is retried and then replaced, and that the
+        read finishes on the next provider at the block already chosen rather than at its own latest.
+        """
+        mocker.patch("tenacity.nap.time")  # Skip retry backoff sleeps
+        primary = self._connected_w3(block_number=5_000, delegation_ratio=16)
+        primary.eth.contract.return_value.functions.getTokensAvailable.return_value.call.side_effect = (
+            requests.exceptions.HTTPError("429 Client Error: Too Many Requests")
+        )
+        secondary = self._connected_w3(block_number=5_003, delegation_ratio=16)
+        secondary.eth.contract.return_value.functions.getTokensAvailable.return_value.call.return_value = 7
+
+        # Each provider URL gets its own Web3 instance, so a rotation really changes which one is asked
+        providers = dict(zip(MOCK_RPC_PROVIDERS, [primary, secondary]))
+        mock_w3.HTTPProvider.side_effect = lambda url: url
+        mock_w3.side_effect = lambda url: providers[url]
+        client = BlockchainClient(
+            rpc_providers=MOCK_RPC_PROVIDERS,
+            contract_address=MOCK_CONTRACT_ADDRESS,
+            project_root=MOCK_PROJECT_ROOT,
+            block_explorer_url=MOCK_BLOCK_EXPLORER_URL,
+            tx_timeout_seconds=MOCK_TX_TIMEOUT_SECONDS,
+            slack_notifier=mock_slack,
+        )
+
+        snapshot = client.read_total_stake(["0xindexer"], self.STAKING_ADDRESS, self.SUBGRAPH_SERVICE_ADDRESS)
+
+        assert snapshot.stake_by_indexer == {"0xindexer": 7}
+        assert snapshot.block_number == 4_950
+        assert client.current_rpc_index == 1
+        secondary_call = secondary.eth.contract.return_value.functions.getTokensAvailable.return_value.call
+        secondary_call.assert_called_once_with(block_identifier=4_950)
+
+
+    def test_read_total_stake_raises_when_every_provider_fails(
+        self, blockchain_client: BlockchainClient, mocker: MockerFixture
+    ):
+        """
+        Tests that stake no provider can return raises, rather than coming back as zero or partial.
+        """
+        mocker.patch("tenacity.nap.time")  # Skip retry backoff sleeps
+        functions = blockchain_client.w3.eth.contract.return_value.functions
+        functions.getDelegationRatio.return_value.call.return_value = 16
+        functions.getTokensAvailable.return_value.call.side_effect = requests.exceptions.HTTPError("429")
+
+        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+            blockchain_client.read_total_stake(["0xindexer"], self.STAKING_ADDRESS, self.SUBGRAPH_SERVICE_ADDRESS)

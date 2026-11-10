@@ -11,7 +11,7 @@ This module handles all blockchain interactions including:
 import json
 import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union, cast
 
 from eth_account.datastructures import SignedTransaction
 from requests.exceptions import ConnectionError, HTTPError, Timeout
@@ -85,6 +85,44 @@ CHAIN_LEVEL_ERROR_PATTERNS = NONCE_ERROR_PATTERNS + (
     "exceeds block gas limit",
     "max fee per gas less than block base fee",
 )
+
+
+# The only 2 view functions read to size each indexer's stake, so no ABI file is needed for them
+HORIZON_STAKING_ABI = [
+    {
+        "type": "function",
+        "name": "getTokensAvailable",
+        "stateMutability": "view",
+        "inputs": [
+            {"name": "serviceProvider", "type": "address"},
+            {"name": "verifier", "type": "address"},
+            {"name": "delegationRatio", "type": "uint32"},
+        ],
+        "outputs": [{"name": "", "type": "uint256"}],
+    }
+]
+DATA_SERVICE_ABI = [
+    {
+        "type": "function",
+        "name": "getDelegationRatio",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint32"}],
+    }
+]
+
+
+# Stake is read this many blocks behind the head, about 12 seconds on Arbitrum, so a provider that is
+# slightly behind, or a backend behind the same URL that is, still holds the block being read
+STAKE_READ_BLOCKS_BEHIND_HEAD = 50
+
+
+class StakeSnapshot(NamedTuple):
+    """Each indexer's total stake in wei, keyed as the caller named it, with the block and ratio behind it."""
+
+    block_number: int
+    delegation_ratio: int
+    stake_by_indexer: Dict[str, int]
 
 
 class TransactionError(Exception):
@@ -261,6 +299,75 @@ class BlockchainClient:
 
         self._get_next_rpc_provider()
         return providers_tried
+
+
+    def _read_view(
+        self, address: str, abi: List[Dict], function_name: str, *args: Any, block: Union[int, str]
+    ) -> Any:
+        """
+        Call a view function at the given block through the provider failover.
+
+        The contract is built inside the call rather than once up front, so a retry after rotating
+        providers asks the new provider instead of the one that just failed.
+        """
+
+
+        def call() -> Any:
+            contract = self.w3.eth.contract(address=Web3.to_checksum_address(address), abi=abi)
+            return getattr(contract.functions, function_name)(*args).call(block_identifier=block)
+
+        return self._execute_rpc_call(call)
+
+
+    def read_delegation_ratio(self, subgraph_service_address: str, block: Union[int, str] = "latest") -> int:
+        """
+        Read the SubgraphService's delegation ratio: how many times its provision an indexer's delegation
+        can count for. A single cheap read, so it also serves as an early check that stake can be read.
+        """
+        return int(self._read_view(subgraph_service_address, DATA_SERVICE_ABI, "getDelegationRatio", block=block))
+
+
+    def read_total_stake(
+        self, indexers: Sequence[str], staking_address: str, subgraph_service_address: str
+    ) -> StakeSnapshot:
+        """
+        Read each indexer's total stake for the SubgraphService, every read at the same block.
+
+        Total stake is what HorizonStaking's getTokensAvailable returns: the indexer's provision to the
+        SubgraphService plus the GRT delegated to it, each less any GRT thawing, with delegation counted
+        only up to the delegation ratio times the provision. A provider that fails is retried and then
+        rotated out like any other call, and a read no provider can answer raises rather than leaving a
+        gap, since a missing stake must never be taken as zero.
+
+        Raises:
+            ConnectionError: If every provider fails a read. A revert or a malformed address is raised
+                as it is, without trying other providers, since every provider would give the same answer.
+        """
+        head = int(self._execute_rpc_call(lambda: self.w3.eth.block_number))
+        block_number = max(head - STAKE_READ_BLOCKS_BEHIND_HEAD, 0)
+        delegation_ratio = self.read_delegation_ratio(subgraph_service_address, block=block_number)
+        verifier = Web3.to_checksum_address(subgraph_service_address)
+
+        # Each indexer's stake, under the ratio and at the block chosen above
+        stake_by_indexer = {}
+        for indexer in indexers:
+            stake_by_indexer[indexer] = int(
+                self._read_view(
+                    staking_address,
+                    HORIZON_STAKING_ABI,
+                    "getTokensAvailable",
+                    Web3.to_checksum_address(indexer),
+                    verifier,
+                    delegation_ratio,
+                    block=block_number,
+                )
+            )
+
+        logger.info(
+            f"Read total stake for {len(stake_by_indexer)} indexers at block {block_number} "
+            f"with a delegation ratio of {delegation_ratio}"
+        )
+        return StakeSnapshot(block_number, delegation_ratio, stake_by_indexer)
 
 
     def _setup_transaction_account(self, private_key: str) -> Tuple[str, str]:

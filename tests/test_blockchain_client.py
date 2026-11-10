@@ -1332,8 +1332,8 @@ class TestStakeReads:
 
     def test_read_total_stake_reads_every_indexer_at_one_block(self, blockchain_client: BlockchainClient):
         """
-        Tests that the ratio and every indexer's stake are read at the same block, with each indexer's
-        stake asked of the SubgraphService under the ratio read on chain.
+        Tests that the ratio and every indexer's stake are read at the same block, a little behind the
+        head so every provider has it, with each indexer's stake asked under the ratio read on chain.
         """
         w3 = blockchain_client.w3
         w3.eth.block_number = 5_000
@@ -1348,10 +1348,10 @@ class TestStakeReads:
             ["0xsmall", "0xlarge"], self.STAKING_ADDRESS, self.SUBGRAPH_SERVICE_ADDRESS
         )
 
-        assert snapshot.block_number == 5_000
+        assert snapshot.block_number == 4_950
         assert snapshot.delegation_ratio == 16
         assert snapshot.stake_by_indexer == stake
-        functions.getDelegationRatio.return_value.call.assert_called_once_with(block_identifier=5_000)
+        functions.getDelegationRatio.return_value.call.assert_called_once_with(block_identifier=4_950)
         for indexer in stake:
             functions.getTokensAvailable.assert_any_call(indexer, self.SUBGRAPH_SERVICE_ADDRESS, 16)
 
@@ -1407,10 +1407,10 @@ class TestStakeReads:
         snapshot = client.read_total_stake(["0xindexer"], self.STAKING_ADDRESS, self.SUBGRAPH_SERVICE_ADDRESS)
 
         assert snapshot.stake_by_indexer == {"0xindexer": 7}
-        assert snapshot.block_number == 5_000
+        assert snapshot.block_number == 4_950
         assert client.current_rpc_index == 1
         secondary_call = secondary.eth.contract.return_value.functions.getTokensAvailable.return_value.call
-        secondary_call.assert_called_once_with(block_identifier=5_000)
+        secondary_call.assert_called_once_with(block_identifier=4_950)
 
 
     def test_read_total_stake_raises_when_every_provider_fails(

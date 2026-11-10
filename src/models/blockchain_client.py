@@ -112,6 +112,11 @@ DATA_SERVICE_ABI = [
 ]
 
 
+# Stake is read this many blocks behind the head, about 12 seconds on Arbitrum, so a provider that is
+# slightly behind, or a backend behind the same URL that is, still holds the block being read
+STAKE_READ_BLOCKS_BEHIND_HEAD = 50
+
+
 class StakeSnapshot(NamedTuple):
     """Each indexer's total stake in wei, keyed as the caller named it, with the block and ratio behind it."""
 
@@ -337,7 +342,8 @@ class BlockchainClient:
         Raises:
             ConnectionError: If every provider fails a read
         """
-        block_number = int(self._execute_rpc_call(lambda: self.w3.eth.block_number))
+        head = int(self._execute_rpc_call(lambda: self.w3.eth.block_number))
+        block_number = max(head - STAKE_READ_BLOCKS_BEHIND_HEAD, 0)
         delegation_ratio = self.read_delegation_ratio(subgraph_service_address, block=block_number)
         verifier = Web3.to_checksum_address(subgraph_service_address)
 

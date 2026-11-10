@@ -340,14 +340,15 @@ class BlockchainClient:
         gap, since a missing stake must never be taken as zero.
 
         Raises:
-            ConnectionError: If every provider fails a read
+            ConnectionError: If every provider fails a read. A revert or a malformed address is raised
+                as it is, without trying other providers, since every provider would give the same answer.
         """
         head = int(self._execute_rpc_call(lambda: self.w3.eth.block_number))
         block_number = max(head - STAKE_READ_BLOCKS_BEHIND_HEAD, 0)
         delegation_ratio = self.read_delegation_ratio(subgraph_service_address, block=block_number)
         verifier = Web3.to_checksum_address(subgraph_service_address)
 
-        # Checksummed before the read so a malformed address fails at once rather than rotating providers
+        # Each indexer's stake, under the ratio and at the block chosen above
         stake_by_indexer = {}
         for indexer in indexers:
             stake_by_indexer[indexer] = int(

@@ -10,38 +10,10 @@ This document defines the requirements an Indexer must meet to be eligible for i
 
 | Upcoming Requirement | Justification | Date Requirement Will Be Updated/Introduced (YYYY-MM-DD) |
 |----------------------|---------------|----------------------------------------------------------|
-| **Subgraph Coverage, Stage 1:** The daily subgraph minimum will scale with each indexer's total stake. To be active, an indexer must serve at least 1 qualifying query on each of at least **10 subgraphs**, or **1 subgraph per 4M GRT** of total stake (rounded up), whichever is greater. Only indexers with more than **40M GRT** of total stake will need more than 10 subgraphs. Indexers still need **5+ active days** in a given **28 day** period. From that date, each daily run checks every day still in the 28 day window against the indexer's new minimum, including days before 2026-11-17. See [How the Stake-Scaled Subgraph Minimum Will Work](#how-the-stake-scaled-subgraph-minimum-will-work) for how total stake is measured, examples and the long-term target. | Indexing rewards depend on stake, so the indexers that receive the most rewards should do the most work. | 2026-11-17 |
+| **Example Requirement:** | This is a placeholder for future criteria. Watch this space to stay informed. We will also announce upcoming requirements via official channels. | `YYYY-MM-DD` |
 
 > **Note**:
 > We will typically allow a 14 day window after announcing a change before it goes live.
-
-### How the Stake-Scaled Subgraph Minimum Will Work
-
-From 2026-11-17, the number of subgraphs an indexer must serve each day for that day to count as active is:
-
-```text
-required subgraphs = the greater of 10, or (total stake / 4M GRT) rounded up
-```
-
-In words, divide the indexer's total stake by 4M GRT and round up to a whole number of subgraphs. If the result is below 10, the minimum stays at 10. An indexer with exactly 40M GRT still needs 10 subgraphs, while one with 41M GRT needs 11.
-
-Total stake is the GRT the indexer has provisioned to the SubgraphService plus the GRT delegated to that provision. Delegation counts only up to the SubgraphService's delegation ratio, currently 16 times the indexer's provision, because delegation above that cannot be used for allocations and adds no rewards. For example, an indexer with 2M GRT provisioned counts at most 32M GRT of delegation, so its total stake is at most 34M GRT. GRT the indexer has staked but not provisioned to the SubgraphService does not count, and neither does GRT that is thawing (being withdrawn), whether from the provision or from delegation. The oracle reads each indexer's total stake once at every daily run and applies the resulting minimum to every day in the 28 day window, so a change in stake changes the minimum from the next run.
-
-The count is of subgraphs the indexer **serves qualifying queries on**, not subgraphs it has synced. Not every synced subgraph receives queries every day, so plan sync capacity with headroom above your number.
-
-This is Stage 1. The minimum will rise in stages towards a long-term target of **1 qualifying subgraph per 1M GRT** of total stake, keeping the minimum of 10. Each later stage will be announced in the table above separately, with at least 14 days' notice and the data from the stage before it.
-
-Until 2026-11-17 every indexer needs 10 subgraphs. The examples below show the requirement at Stage 1, from 2026-11-17, and at the long-term target, whose date is not yet set.
-
-| Total stake | Stage 1 from 2026-11-17 (1 per 4M GRT) | Long-term target, reached in later stages (1 per 1M GRT) |
-|-------------|----------------------------------------|----------------------------------------------------------|
-| 10M GRT | 10 / 4 = 2.5, rounded up to 3, so the minimum of 10 applies | 10 |
-| 30M GRT | 30 / 4 = 7.5, rounded up to 8, so the minimum of 10 applies | 30 |
-| 40M GRT | 40 / 4 = 10 | 40 |
-| 41M GRT | 41 / 4 = 10.25, rounded up to 11 | 41 |
-| 50M GRT | 50 / 4 = 12.5, rounded up to 13 | 50 |
-| 100M GRT | 100 / 4 = 25 | 100 |
-| 200M GRT | 200 / 4 = 50 | 200 |
 
 ---
 
@@ -51,7 +23,7 @@ The following criteria are used to identify indexers that should be eligible to 
 
 - **Days Online Requirement:** Indexers must be active for **5+ days** in a given **28 day** period for rewards eligibility.
 - **Daily Query Requirement:** To be active, an indexer must serve at least **1 qualifying query**.
-- **Subgraph Coverage Requirement:** To be active, an indexer must serve at least 1 qualifying query on each of at least **10 subgraphs** that day.
+- **Subgraph Coverage Requirement:** To be active, an indexer must serve at least 1 qualifying query on each of at least **10 subgraphs** that day, or **1 subgraph per 4M GRT** of total stake (rounded up), whichever is greater. Only indexers with more than **40M GRT** of total stake need more than 10. See [How the Stake-Scaled Subgraph Minimum Works](#how-the-stake-scaled-subgraph-minimum-works).
 - **Query Quality Requirements:** A qualifying query is one that simultaneously meets **all** of the following criteria:
   - Query Response HTTP Status: **200 OK**.
   - Query Response Latency: **< 5,000 ms**.
@@ -64,7 +36,7 @@ Eligibility for indexing rewards is typically refreshed daily via the RewardsEli
 
 ### Where These Criteria Are Enforced
 
-The values above are the ones deployed today. Most are set in the deployment's `config.toml` (see [`config.toml.example`](./config.toml.example)): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query that applies them is in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py), which also fixes the 2 values with no config key.
+The values above are the ones deployed today. Most are set in the deployment's `config.toml` (see [`config.toml.example`](./config.toml.example)): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query and the checks that apply them are in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py), which also fixes the 2 values set in the query, and each indexer's stake is read from the chain by [`src/models/blockchain_client.py`](./src/models/blockchain_client.py).
 
 | Requirement | Config Key | Deployed Value |
 |-------------|------------|----------------|
@@ -72,9 +44,39 @@ The values above are the ones deployed today. Most are set in the deployment's `
 | Analysis window (days) | `BIGQUERY_ANALYSIS_PERIOD_DAYS` | 28 |
 | Qualifying queries per active day | None, set in the query | 1 |
 | Subgraphs with a qualifying query per active day | `MIN_SUBGRAPHS` | 10 |
+| Total stake per required subgraph above that minimum (GRT) | `GRT_PER_SUBGRAPH` | 4,000,000 |
+| Delegation counted, as a multiple of the provision | None, read from the SubgraphService contract | 16 |
 | Query response HTTP status | None, set in the query | 200 OK |
 | Query latency must be below (ms) | `MAX_LATENCY_MS` | 5,000 |
 | Blocks behind chainhead must be below | `MAX_BLOCKS_BEHIND` | 50,000 |
+
+### How the Stake-Scaled Subgraph Minimum Works
+
+The number of subgraphs an indexer must serve each day for that day to count as active is:
+
+```text
+required subgraphs = the greater of 10, or (total stake / 4M GRT) rounded up
+```
+
+In words, divide the indexer's total stake by 4M GRT and round up to a whole number of subgraphs. If the result is below 10, the minimum stays at 10. An indexer with exactly 40M GRT still needs 10 subgraphs, while one with 41M GRT needs 11.
+
+Total stake is the GRT the indexer has provisioned to the SubgraphService plus the GRT delegated to that provision. Delegation counts only up to the SubgraphService's delegation ratio, currently 16 times the indexer's provision, because delegation above that cannot be used for allocations and adds no rewards. For example, an indexer with 2M GRT provisioned counts at most 32M GRT of delegation, so its total stake is at most 34M GRT. GRT the indexer has staked but not provisioned to the SubgraphService does not count, and neither does GRT that is thawing (being withdrawn), whether from the provision or from delegation. The oracle reads each indexer's total stake once at every daily run and applies the resulting minimum to every day in the 28 day window, so a change in stake changes the minimum from the next run. The figure is what the HorizonStaking contract's `getTokensAvailable` returns for the indexer and the SubgraphService under that delegation ratio, so an indexer can check its own.
+
+The count is of subgraphs the indexer **serves qualifying queries on**, not subgraphs it has synced. Not every synced subgraph receives queries every day, so plan sync capacity with headroom above your number.
+
+This is Stage 1. The minimum will rise in stages towards a long-term target of **1 qualifying subgraph per 1M GRT** of total stake, keeping the minimum of 10. Each later stage will be announced separately in the [Upcoming Eligibility Criteria](#upcoming-eligibility-criteria) table, with at least 14 days' notice and the data from the stage before it.
+
+The examples below show the requirement at Stage 1, active since 2026-11-17, and at the long-term target, whose date is not yet set.
+
+| Total stake | Stage 1, active since 2026-11-17 (1 per 4M GRT) | Long-term target, reached in later stages (1 per 1M GRT) |
+|-------------|-------------------------------------------------|----------------------------------------------------------|
+| 10M GRT | 10 / 4 = 2.5, rounded up to 3, so the minimum of 10 applies | 10 |
+| 30M GRT | 30 / 4 = 7.5, rounded up to 8, so the minimum of 10 applies | 30 |
+| 40M GRT | 40 / 4 = 10 | 40 |
+| 41M GRT | 41 / 4 = 10.25, rounded up to 11 | 41 |
+| 50M GRT | 50 / 4 = 12.5, rounded up to 13 | 50 |
+| 100M GRT | 100 / 4 = 25 | 100 |
+| 200M GRT | 200 / 4 = 50 | 200 |
 
 ---
 
@@ -90,5 +92,6 @@ This table tracks changes to the indexing rewards eligibility requirements over 
 | **Query Response Quality** | *•* Query Response HTTP Status: **200 OK**<br>*•* Query Response Latency: **< 5,000 ms**<br>*•* Query Freshness: **< 50,000 blocks** behind chainhead. | 2026-08-25 | Initial | *•* Indexer infrastructure needs to serve successful queries to benefit data consumers.<br>*•* Fast query responses are important to data consumers.<br>*•* Encourages indexers to sync to chainhead. | Planned for Rewards Eligibility Oracle launch |
 | **Subgraph Coverage** | Indexers must serve at least 1 qualifying query on each of **≥5 subgraphs** in a day for the day to count towards the **Indexer Activity** requirement. | 2026-10-06 | Updated | Encourages indexers to sync and reliably serve a range of subgraphs rather than a single one. | Raised from **1 subgraph**. Announced 2026-09-22 |
 | **Subgraph Coverage** | Indexers must serve at least 1 qualifying query on each of **≥10 subgraphs** in a day for the day to count towards the **Indexer Activity** requirement. | 2026-10-27 | Updated | Encourages indexers to sync and reliably serve a wider range of subgraphs. | Raised from **5 subgraphs**. Announced 2026-10-13. From this date each daily run also checks the earlier days still in the 28 day window against the new minimum |
+| **Subgraph Coverage** | Indexers must serve at least 1 qualifying query on each of **≥10 subgraphs**, or **1 subgraph per 4M GRT** of total stake (rounded up) if that is greater, in a day for the day to count towards the **Indexer Activity** requirement. | 2026-11-17 | Updated | Indexing rewards depend on stake, so the indexers that receive the most rewards should do the most work. | Stage 1 of a minimum that scales with stake, towards 1 subgraph per 1M GRT. Announced 2026-11-03. From this date each daily run also checks the earlier days still in the 28 day window against the new minimum |
 
 ---

@@ -12,13 +12,13 @@ import sys
 import time
 from datetime import date, timedelta
 from pathlib import Path
-from typing import List, NamedTuple, Optional
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import pandas as pd
 
 # Import data access utilities with absolute import
 from src.models.bigquery_provider import BigQueryProvider
-from src.models.blockchain_client import BlockchainClient
+from src.models.blockchain_client import BlockchainClient, StakeSnapshot
 from src.models.data_edge_client import DataEdgeClient, DataEdgePendingError
 from src.models.eligibility_pipeline import EligibilityPipeline
 from src.utils.circuit_breaker import CircuitBreaker
@@ -29,6 +29,7 @@ from src.utils.configuration import (
 from src.utils.data_edge_codec import encode_payload, select_days_to_publish
 from src.utils.opsgenie import send_opsgenie_alert_safe
 from src.utils.slack_notifier import create_slack_notifier
+from src.utils.subgraph_minimum import format_grt, required_subgraphs
 
 # Set up basic logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -37,6 +38,9 @@ logger = logging.getLogger(__name__)
 # Most days a run reaches back to cover days earlier runs failed to publish. Matches the scheduler's
 # limit on catching up missed runs, and keeps the payload far below a transaction's size limit.
 MAX_PUBLISH_CATCH_UP_DAYS = 7
+
+# An address with no stake, read before the query to check both stake contracts answer
+STAKE_CHECK_ADDRESS = "0x" + "0" * 40
 
 
 class RunProgress:
@@ -294,17 +298,9 @@ def main(run_date_override: date = None):
         # Initialize pipeline early to check for cached data
         pipeline = EligibilityPipeline(project_root=project_root_path)
 
-        # What this run will publish, if anything, filled in by the step that loads the data
-        publication = PendingPublication()
-        eligible_indexers = _get_eligible_indexers(
-            config, credentials, pipeline, current_run_date, start_date, progress, publication
-        )
-
-        # Clean up old data directories (run this regardless of cache hit/miss)
-        pipeline.clean_old_date_directories(config["MAX_AGE_BEFORE_DELETION"])
-
-        # --- Blockchain Submission Stage ---
-        progress.stage = "Blockchain Submission"
+        # Every run needs the chain to renew eligibility, and some read stake from it too, so connect
+        # before the BigQuery query rather than paying for it and then finding no provider answers
+        progress.stage = "Blockchain Connection"
         logger.info("Instantiating BlockchainClient...")
         blockchain_client = BlockchainClient(
             rpc_providers=config["BLOCKCHAIN_RPC_URLS"],
@@ -314,6 +310,19 @@ def main(run_date_override: date = None):
             tx_timeout_seconds=config["TX_TIMEOUT_SECONDS"],
             slack_notifier=slack_notifier,
         )
+
+        # What this run will publish, if anything, filled in by the step that loads the data
+        publication = PendingPublication()
+        eligible_indexers = _get_eligible_indexers(
+            config, credentials, pipeline, current_run_date, start_date, progress, publication, blockchain_client
+        )
+
+        # Clean up old data directories (run this regardless of cache hit/miss)
+        pipeline.clean_old_date_directories(config["MAX_AGE_BEFORE_DELETION"])
+
+        # --- Blockchain Submission Stage ---
+        progress.stage = "Blockchain Submission"
+
         # Renewals replace the sender's oldest pending transaction, which would evict a DataEdge
         # publish still in flight. Submitting them first leaves nothing of ours pending to evict.
         submission_error = None
@@ -399,7 +408,9 @@ def _log_alerting_channels(slack_notifier, opsgenie_api_key) -> None:
         logger.info("OpsGenie alerting disabled (no API key configured)")
 
 
-def _get_eligible_indexers(config, credentials, pipeline, current_run_date, start_date, progress, publication):
+def _get_eligible_indexers(
+    config, credentials, pipeline, current_run_date, start_date, progress, publication, blockchain_client
+):
     """Load the run date's eligible indexers from fresh cached files, or fetch and process them from BigQuery."""
     # Check for fresh cached data first (30 minutes by default)
     cache_max_age_minutes = int(config.get("CACHE_MAX_AGE_MINUTES", 30))
@@ -427,7 +438,15 @@ def _get_eligible_indexers(config, credentials, pipeline, current_run_date, star
     if force_refresh or not pipeline.has_fresh_processed_data(current_run_date, cache_max_age_minutes):
         reason = "forced refresh" if force_refresh else "no fresh cached data available"
         eligible_indexers = _fetch_and_process_eligibility_data(
-            config, credentials, pipeline, current_run_date, start_date, reason, progress, publication
+            config,
+            credentials,
+            pipeline,
+            current_run_date,
+            start_date,
+            reason,
+            progress,
+            publication,
+            blockchain_client,
         )
 
     return eligible_indexers
@@ -480,9 +499,18 @@ def _queue_unpublished_cached_metrics(config, pipeline, current_run_date, public
 
 
 def _fetch_and_process_eligibility_data(
-    config, credentials, pipeline, current_run_date, start_date, reason, progress, publication
+    config, credentials, pipeline, current_run_date, start_date, reason, progress, publication, blockchain_client
 ):
     """Fetch indexer performance from BigQuery and work out which indexers are eligible."""
+    # Stake is read straight after the query, so before paying for the query, read it for an address with
+    # none. That touches both stake contracts, so a dead RPC or a wrong contract address fails the run here.
+    if config.get("GRT_PER_SUBGRAPH") is not None:
+        progress.stage = "Stake Check"
+        check = blockchain_client.read_total_stake(
+            [STAKE_CHECK_ADDRESS], config["HORIZON_STAKING_ADDRESS"], config["SUBGRAPH_SERVICE_ADDRESS"]
+        )
+        logger.info(f"Stake can be read: delegation counts up to {check.delegation_ratio}x the provision")
+
     # --- Fresh Data Path (BigQuery + Processing) ---
     progress.stage = "Data Fetching from BigQuery"
     end_date = current_run_date
@@ -504,9 +532,11 @@ def _fetch_and_process_eligibility_data(
     daily_metrics = bigquery_provider.fetch_indexer_daily_metrics(start_date, end_date)
     logger.info(f"Successfully fetched {len(daily_metrics)} daily metric rows from BigQuery.")
 
-    daily_metrics = bigquery_provider.mark_online_days(daily_metrics)
+    required, stake = _read_required_subgraphs(config, blockchain_client, daily_metrics, progress)
+    daily_metrics = bigquery_provider.mark_online_days(daily_metrics, required)
 
     eligibility_data = bigquery_provider.aggregate_daily_metrics(daily_metrics)
+    eligibility_data = _add_stake_columns(config, eligibility_data, required, stake)
     logger.info(f"Aggregated daily metrics for {len(eligibility_data)} indexers.")
 
     # --- Data Processing Stage ---
@@ -523,6 +553,7 @@ def _fetch_and_process_eligibility_data(
         "MIN_SUBGRAPHS": config["MIN_SUBGRAPHS"],
         "MAX_LATENCY_MS": config["MAX_LATENCY_MS"],
         "MAX_BLOCKS_BEHIND": config["MAX_BLOCKS_BEHIND"],
+        "GRT_PER_SUBGRAPH": config.get("GRT_PER_SUBGRAPH"),
     }
     # Only the publish needs these, so failing to save them skips it rather than stopping the renewals
     try:
@@ -540,6 +571,11 @@ def _fetch_and_process_eligibility_data(
             source="bigquery",
             indexers_evaluated=len(eligibility_data),
             indexers_eligible=len(eligible_indexers),
+            stake_read=(
+                {"block_number": stake.block_number, "delegation_ratio": stake.delegation_ratio}
+                if stake is not None
+                else None
+            ),
         )
 
     except Exception as e:
@@ -563,6 +599,56 @@ def _fetch_and_process_eligibility_data(
     publication.indexers_evaluated = len(eligibility_data)
 
     return eligible_indexers
+
+
+def _read_required_subgraphs(
+    config, blockchain_client, daily_metrics, progress
+) -> Tuple[Optional[Dict[str, int]], Optional[StakeSnapshot]]:
+    """
+    Read the stake of every indexer in the window and work out how many subgraphs each must serve a day.
+
+    Returns (None, None) when GRT_PER_SUBGRAPH is unset, since every indexer is then held to
+    MIN_SUBGRAPHS and no stake is needed. A stake read that fails raises and so fails the run, rather
+    than judging an indexer against a minimum that ignores its stake.
+    """
+    grt_per_subgraph = config.get("GRT_PER_SUBGRAPH")
+    if grt_per_subgraph is None:
+        return None, None
+
+    progress.stage = "Reading Stake"
+    indexers = sorted(daily_metrics["indexer"].unique()) if not daily_metrics.empty else []
+    stake = blockchain_client.read_total_stake(
+        indexers, config["HORIZON_STAKING_ADDRESS"], config["SUBGRAPH_SERVICE_ADDRESS"]
+    )
+
+    required = {
+        indexer: required_subgraphs(stake_wei, config["MIN_SUBGRAPHS"], grt_per_subgraph)
+        for indexer, stake_wei in stake.stake_by_indexer.items()
+    }
+    above_minimum = sum(1 for count in required.values() if count > config["MIN_SUBGRAPHS"])
+    logger.info(f"{above_minimum} of {len(required)} indexers need more than {config['MIN_SUBGRAPHS']} subgraphs")
+
+    return required, stake
+
+
+def _add_stake_columns(config, eligibility_data, required, stake):
+    """
+    Add each indexer's total stake and the subgraph minimum it was held to beside its outcome, so a
+    decision can be checked by hand. Stake is left empty when the minimum did not depend on it.
+    """
+    with_stake = eligibility_data.copy()
+
+    if required is None:
+        with_stake["required_subgraphs"] = config["MIN_SUBGRAPHS"]
+        with_stake["total_stake_grt"] = None
+
+    else:
+        with_stake["required_subgraphs"] = with_stake["indexer"].map(required)
+        with_stake["total_stake_grt"] = with_stake["indexer"].map(
+            lambda indexer: format_grt(stake.stake_by_indexer[indexer])
+        )
+
+    return with_stake
 
 
 def _send_success_notification(

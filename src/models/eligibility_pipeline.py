@@ -222,6 +222,7 @@ class EligibilityPipeline:
         source: str,
         indexers_evaluated: int,
         indexers_eligible: int,
+        stake_read: Optional[Dict[str, int]] = None,
     ) -> Path:
         """
         Save the manifest describing how a run was produced.
@@ -238,6 +239,8 @@ class EligibilityPipeline:
                 cached artifacts leaves the manifest of the run that produced them in place
             indexers_evaluated: Number of indexers the run considered
             indexers_eligible: Number of indexers the run found eligible
+            stake_read: The block_number and delegation_ratio stake was read at, when the run held
+                indexers to a stake-scaled minimum, so the same stake can be read again to check it
 
         Returns:
             Path: Path to the saved JSON
@@ -250,6 +253,7 @@ class EligibilityPipeline:
             "source": source,
             "indexers_evaluated": indexers_evaluated,
             "indexers_eligible": indexers_eligible,
+            "stake_read": stake_read,
             # Records that the per-day metrics reached the chain, so a later run serving these same
             # artifacts can tell a publish that has still to happen from one already done
             "published_tx": None,

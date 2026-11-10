@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from src.models.blockchain_client import StakeSnapshot
 from src.models.data_edge_client import DataEdgePendingError
 
 MOCK_CONFIG = {
@@ -42,6 +43,27 @@ MOCK_CONFIG = {
     "ETHERSCAN_API_KEY": "fake-etherscan-key",
     "ARBITRUM_API_KEY": "fake-arbitrum-key",
 }
+
+# The stake-scaled minimum switched on: 1 subgraph per 4M GRT of total stake, never fewer than 10
+MOCK_STAKE_SCALED_CONFIG = {
+    **MOCK_CONFIG,
+    "MIN_SUBGRAPHS": 10,
+    "GRT_PER_SUBGRAPH": 4_000_000,
+    "HORIZON_STAKING_ADDRESS": "0x" + "5" * 40,
+    "SUBGRAPH_SERVICE_ADDRESS": "0x" + "6" * 40,
+}
+
+# Stake read for 2 indexers: 50M GRT needs 13 subgraphs at 1 per 4M, and 9M GRT stays at the minimum of 10
+MOCK_STAKE_SNAPSHOT = StakeSnapshot(
+    block_number=523_012_669,
+    delegation_ratio=16,
+    stake_by_indexer={"0xlarge": 50_000_000 * 10**18, "0xsmall": 9_000_000 * 10**18},
+)
+
+# What the stake check before the query reads: the zero address, which has no stake
+MOCK_STAKE_CHECK_SNAPSHOT = StakeSnapshot(
+    block_number=523_012_600, delegation_ratio=16, stake_by_indexer={"0x" + "0" * 40: 0}
+)
 
 # A DataEdge deployment to publish per-day metrics to. Absent from MOCK_CONFIG so that publishing
 # stays off unless a test opts into it.
@@ -188,7 +210,7 @@ def test_main_succeeds_on_happy_path(oracle_context):
     # The online days are marked on the fetched rows, and both the summary and the grid use the marked rows
     marked = ctx["bq_provider"].mark_online_days.return_value
     ctx["bq_provider"].mark_online_days.assert_called_once_with(
-        ctx["bq_provider"].fetch_indexer_daily_metrics.return_value
+        ctx["bq_provider"].fetch_indexer_daily_metrics.return_value, None
     )
     ctx["bq_provider"].aggregate_daily_metrics.assert_called_once_with(marked)
     assert ctx["pipeline"].write_daily_metrics.call_args.kwargs["daily_metrics"] is marked
@@ -218,6 +240,7 @@ def test_main_succeeds_on_happy_path(oracle_context):
         ("get_creds", "Initialization"),
         ("load_config", "Initialization"),
         ("slack_create", "Initialization"),
+        ("client_connect", "Blockchain Connection"),
         ("cache_load", "Loading Cached Data"),
         ("bq_provider", "Data Fetching from BigQuery"),
         ("pipeline_process", "Data Processing and Artifact Generation"),
@@ -234,6 +257,7 @@ def test_main_handles_failures_at_each_stage(oracle_context, failing_component, 
         "get_creds": ctx["get_creds"],
         "load_config": ctx["load_config"],
         "slack_create": ctx["slack"]["create"],
+        "client_connect": ctx["client_cls"],
         "cache_load": ctx["pipeline"].load_eligible_indexers_from_csv,
         "bq_provider": ctx["bq_provider"].fetch_indexer_daily_metrics,
         "pipeline_process": ctx["pipeline"].process,
@@ -263,6 +287,147 @@ def test_main_handles_failures_at_each_stage(oracle_context, failing_component, 
         call_args = ctx["slack"]["notifier"].send_failure_notification.call_args.kwargs
         assert call_args["stage"] == expected_stage
         assert call_args["error_message"] == str(error)
+
+
+def test_main_connects_to_the_chain_before_querying_bigquery(oracle_context):
+    """
+    Tests that a run which cannot reach any RPC provider stops before paying for the BigQuery query,
+    since it could not renew eligibility afterwards anyway.
+    """
+    ctx = oracle_context
+    ctx["client_cls"].side_effect = ConnectionError("Failed to connect to any of the 1 RPC providers.")
+
+    with pytest.raises(SystemExit):
+        ctx["main"]()
+
+    ctx["bq_provider"].fetch_indexer_daily_metrics.assert_not_called()
+
+
+def _scale_the_minimum_with_stake(ctx):
+    """Switch the run to the stake-scaled minimum, with 2 indexers in the window and their stake on chain."""
+    ctx["load_config"].return_value = MOCK_STAKE_SCALED_CONFIG
+    ctx["bq_provider"].fetch_indexer_daily_metrics.return_value = pd.DataFrame(
+        {"indexer": ["0xlarge", "0xsmall", "0xlarge"]}
+    )
+    ctx["bq_provider"].aggregate_daily_metrics.return_value = pd.DataFrame(
+        {"indexer": ["0xlarge", "0xsmall"], "eligible_for_indexing_rewards": [1, 1]}
+    )
+    ctx["client"].read_total_stake.side_effect = [MOCK_STAKE_CHECK_SNAPSHOT, MOCK_STAKE_SNAPSHOT]
+
+
+def test_main_holds_each_indexer_to_its_stake_scaled_minimum(oracle_context):
+    """
+    Tests that with GRT_PER_SUBGRAPH set, each indexer's days are judged against its own minimum, worked
+    out from stake read once for every indexer in the window, and that the stake and minimum are kept.
+    """
+    ctx = oracle_context
+    _scale_the_minimum_with_stake(ctx)
+
+    ctx["main"]()
+
+    ctx["client"].read_total_stake.assert_called_with(
+        ["0xlarge", "0xsmall"],
+        MOCK_STAKE_SCALED_CONFIG["HORIZON_STAKING_ADDRESS"],
+        MOCK_STAKE_SCALED_CONFIG["SUBGRAPH_SERVICE_ADDRESS"],
+    )
+    ctx["bq_provider"].mark_online_days.assert_called_once_with(
+        ctx["bq_provider"].fetch_indexer_daily_metrics.return_value, {"0xlarge": 13, "0xsmall": 10}
+    )
+
+    # The summary shows each indexer's stake and the minimum it was held to beside its outcome
+    summary = ctx["pipeline"].process.call_args.kwargs["input_data_from_bigquery"].set_index("indexer")
+    assert summary.loc["0xlarge", "required_subgraphs"] == 13
+    assert summary.loc["0xlarge", "total_stake_grt"] == "50000000"
+    assert summary.loc["0xsmall", "required_subgraphs"] == 10
+    assert summary.loc["0xsmall", "total_stake_grt"] == "9000000"
+
+    # The manifest records the divisor and where the stake was read, so the counts can be checked again
+    metadata = ctx["pipeline"].write_run_metadata.call_args.kwargs
+    assert metadata["criteria"]["GRT_PER_SUBGRAPH"] == 4_000_000
+    assert metadata["stake_read"] == {"block_number": 523_012_669, "delegation_ratio": 16}
+
+
+def test_main_checks_stake_can_be_read_before_querying_bigquery(oracle_context):
+    """
+    Tests that a stake read of an address with no stake, which touches both stake contracts, runs before
+    the BigQuery query, so a dead RPC or a wrong contract address fails the run before it is paid for.
+    """
+    ctx = oracle_context
+    _scale_the_minimum_with_stake(ctx)
+    order = []
+    fetched = ctx["bq_provider"].fetch_indexer_daily_metrics.return_value
+    snapshots = iter([MOCK_STAKE_CHECK_SNAPSHOT, MOCK_STAKE_SNAPSHOT])
+    ctx["bq_provider"].fetch_indexer_daily_metrics.side_effect = lambda *args, **kwargs: (
+        order.append("query") or fetched
+    )
+    ctx["client"].read_total_stake.side_effect = lambda indexers, *args: (
+        order.append(f"stake of {indexers}") or next(snapshots)
+    )
+
+    ctx["main"]()
+
+    assert order == [f"stake of {['0x' + '0' * 40]}", "query", "stake of ['0xlarge', '0xsmall']"]
+    ctx["client"].read_total_stake.assert_any_call(
+        ["0x" + "0" * 40],
+        MOCK_STAKE_SCALED_CONFIG["HORIZON_STAKING_ADDRESS"],
+        MOCK_STAKE_SCALED_CONFIG["SUBGRAPH_SERVICE_ADDRESS"],
+    )
+
+
+def test_main_stops_before_querying_when_stake_cannot_be_read(oracle_context):
+    """
+    Tests that a run which cannot read stake fails at the stake check, without paying for the query.
+    """
+    ctx = oracle_context
+    _scale_the_minimum_with_stake(ctx)
+    error = ConnectionError("All RPC providers are unreachable.")
+    ctx["client"].read_total_stake.side_effect = error
+
+    with pytest.raises(SystemExit) as excinfo:
+        ctx["main"]()
+
+    assert excinfo.value.code == 1
+    ctx["bq_provider"].fetch_indexer_daily_metrics.assert_not_called()
+    ctx["logger_error"].assert_any_call(f"Oracle failed at stage 'Stake Check': {error}", exc_info=True)
+
+
+def test_main_fails_when_stake_cannot_be_read_after_the_query(oracle_context):
+    """
+    Tests that stake which cannot be read after the query fails the run, rather than letting any indexer
+    be judged against a minimum that ignores its stake.
+    """
+    ctx = oracle_context
+    _scale_the_minimum_with_stake(ctx)
+    error = ConnectionError("All RPC providers are unreachable.")
+    ctx["client"].read_total_stake.side_effect = [MOCK_STAKE_CHECK_SNAPSHOT, error]
+
+    with pytest.raises(SystemExit) as excinfo:
+        ctx["main"]()
+
+    assert excinfo.value.code == 1
+    ctx["pipeline"].process.assert_not_called()
+    ctx["client"].batch_renew_indexer_rewards_eligibility.assert_not_called()
+    ctx["logger_error"].assert_any_call(f"Oracle failed at stage 'Reading Stake': {error}", exc_info=True)
+
+
+def test_main_reads_no_stake_when_the_minimum_does_not_scale(oracle_context):
+    """
+    Tests that without GRT_PER_SUBGRAPH no stake is read and every indexer is held to MIN_SUBGRAPHS.
+    """
+    ctx = oracle_context
+    ctx["bq_provider"].aggregate_daily_metrics.return_value = pd.DataFrame(
+        {"indexer": ["0xindexer"], "eligible_for_indexing_rewards": [1]}
+    )
+
+    ctx["main"]()
+
+    ctx["client"].read_total_stake.assert_not_called()
+    summary = ctx["pipeline"].process.call_args.kwargs["input_data_from_bigquery"]
+    assert summary.loc[0, "required_subgraphs"] == MOCK_CONFIG["MIN_SUBGRAPHS"]
+    assert pd.isna(summary.loc[0, "total_stake_grt"])
+    metadata = ctx["pipeline"].write_run_metadata.call_args.kwargs
+    assert metadata["criteria"]["GRT_PER_SUBGRAPH"] is None
+    assert metadata["stake_read"] is None
 
 
 def test_main_uses_date_override_correctly(oracle_context):

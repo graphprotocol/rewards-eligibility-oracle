@@ -33,11 +33,11 @@ graph TB
 
             subgraph BIGQUERY["BigQuery Analysis"]
                 FetchData["Fetch Indexer Performance Data<br/>over last 28 days<br/>(from BigQuery)"]
-                SQLQuery["- Daily query metrics<br/>- Days online calculation<br/>- Subgraph coverage"]
+                SQLQuery["- Daily query metrics<br/>- Subgraph coverage"]
             end
 
             subgraph PROCESSING["Eligibility Processing"]
-                ApplyCriteria["Apply Criteria e.g.<br/>5+ days online<br/>Latency < 5000ms<br/>Blocks behind < 50000<br/>10+ subgraphs served"]
+                ApplyCriteria["Apply Criteria e.g.<br/>5+ days online<br/>Latency < 5000ms<br/>Blocks behind < 50000<br/>10+ subgraphs served, or more<br/>for stake read from the chain"]
                 FilterData["Filter Eligible<br/>vs Ineligible"]
                 GenArtifacts["Generate CSV Artifacts:<br/>- eligible_indexers.csv<br/>- ineligible_indexers.csv<br/>- full_metrics.csv"]
             end

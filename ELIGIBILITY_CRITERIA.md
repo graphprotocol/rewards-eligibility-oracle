@@ -36,7 +36,7 @@ Eligibility for indexing rewards is typically refreshed daily via the RewardsEli
 
 ### Where These Criteria Are Enforced
 
-The values above are the ones deployed today. Most are set in the deployment's `config.toml` (see [`config.toml.example`](./config.toml.example)): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query and the checks that apply them are in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py), which also fixes the 2 values set in the query, and each indexer's stake is read from the chain by [`src/models/blockchain_client.py`](./src/models/blockchain_client.py).
+The values above are the ones deployed today. Most are set in the deployment's `config.toml` (see [`config.toml.example`](./config.toml.example)): the analysis window under `[processing]` and the rest under `[eligibility_criteria]`. The query and the checks that apply them are in [`src/models/bigquery_provider.py`](./src/models/bigquery_provider.py), which also fixes the 2 values set in the query, and each indexer's stake is read from the chain by [`src/models/blockchain_client.py`](./src/models/blockchain_client.py) and turned into its required subgraph count by [`src/utils/subgraph_minimum.py`](./src/utils/subgraph_minimum.py).
 
 | Requirement | Config Key | Deployed Value |
 |-------------|------------|----------------|
@@ -44,7 +44,7 @@ The values above are the ones deployed today. Most are set in the deployment's `
 | Analysis window (days) | `BIGQUERY_ANALYSIS_PERIOD_DAYS` | 28 |
 | Qualifying queries per active day | None, set in the query | 1 |
 | Subgraphs with a qualifying query per active day | `MIN_SUBGRAPHS` | 10 |
-| Total stake per required subgraph above that minimum (GRT) | `GRT_PER_SUBGRAPH` | 4,000,000 |
+| GRT of total stake per required subgraph, when that comes to more than `MIN_SUBGRAPHS` | `GRT_PER_SUBGRAPH` | 4,000,000 |
 | Delegation counted, as a multiple of the provision | None, read from the SubgraphService contract | 16 |
 | Query response HTTP status | None, set in the query | 200 OK |
 | Query latency must be below (ms) | `MAX_LATENCY_MS` | 5,000 |
@@ -60,7 +60,7 @@ required subgraphs = the greater of 10, or (total stake / 4M GRT) rounded up
 
 In words, divide the indexer's total stake by 4M GRT and round up to a whole number of subgraphs. If the result is below 10, the minimum stays at 10. An indexer with exactly 40M GRT still needs 10 subgraphs, while one with 41M GRT needs 11.
 
-Total stake is the GRT the indexer has provisioned to the SubgraphService plus the GRT delegated to that provision. Delegation counts only up to the SubgraphService's delegation ratio, currently 16 times the indexer's provision, because delegation above that cannot be used for allocations and adds no rewards. For example, an indexer with 2M GRT provisioned counts at most 32M GRT of delegation, so its total stake is at most 34M GRT. GRT the indexer has staked but not provisioned to the SubgraphService does not count, and neither does GRT that is thawing (being withdrawn), whether from the provision or from delegation. The oracle reads each indexer's total stake once at every daily run and applies the resulting minimum to every day in the 28 day window, so a change in stake changes the minimum from the next run. The figure is what the HorizonStaking contract's `getTokensAvailable` returns for the indexer and the SubgraphService under that delegation ratio, so an indexer can check its own.
+Total stake is the GRT the indexer has provisioned to the SubgraphService plus the GRT delegated to that provision. Delegation counts only up to the SubgraphService's delegation ratio, currently 16 times the indexer's provision not counting any of it that is thawing, because delegation above that cannot be used for allocations and adds no rewards. For example, an indexer with 2M GRT provisioned counts at most 32M GRT of delegation, so its total stake is at most 34M GRT. GRT the indexer has staked but not provisioned to the SubgraphService does not count, and neither does GRT that is thawing (being withdrawn), whether from the provision or from delegation. The oracle reads each indexer's total stake once at every daily run and applies the resulting minimum to every day in the 28 day window, so a change in stake changes the minimum from the next run. The figure is what the HorizonStaking contract's `getTokensAvailable` returns for the indexer and the SubgraphService under that delegation ratio, so an indexer can check its own.
 
 The count is of subgraphs the indexer **serves qualifying queries on**, not subgraphs it has synced. Not every synced subgraph receives queries every day, so plan sync capacity with headroom above your number.
 

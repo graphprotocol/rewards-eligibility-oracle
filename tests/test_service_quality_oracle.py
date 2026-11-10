@@ -60,6 +60,11 @@ MOCK_STAKE_SNAPSHOT = StakeSnapshot(
     stake_by_indexer={"0xlarge": 50_000_000 * 10**18, "0xsmall": 9_000_000 * 10**18},
 )
 
+# What the stake check before the query reads: the zero address, which has no stake
+MOCK_STAKE_CHECK_SNAPSHOT = StakeSnapshot(
+    block_number=523_012_600, delegation_ratio=16, stake_by_indexer={"0x" + "0" * 40: 0}
+)
+
 # A DataEdge deployment to publish per-day metrics to. Absent from MOCK_CONFIG so that publishing
 # stays off unless a test opts into it.
 MOCK_DATA_EDGE_ADDRESS = "0x62c2305739cc75f19a3a6d52387ceb3690d99a99"
@@ -307,8 +312,7 @@ def _scale_the_minimum_with_stake(ctx):
     ctx["bq_provider"].aggregate_daily_metrics.return_value = pd.DataFrame(
         {"indexer": ["0xlarge", "0xsmall"], "eligible_for_indexing_rewards": [1, 1]}
     )
-    ctx["client"].read_delegation_ratio.return_value = 16
-    ctx["client"].read_total_stake.return_value = MOCK_STAKE_SNAPSHOT
+    ctx["client"].read_total_stake.side_effect = [MOCK_STAKE_CHECK_SNAPSHOT, MOCK_STAKE_SNAPSHOT]
 
 
 def test_main_holds_each_indexer_to_its_stake_scaled_minimum(oracle_context):
@@ -321,7 +325,7 @@ def test_main_holds_each_indexer_to_its_stake_scaled_minimum(oracle_context):
 
     ctx["main"]()
 
-    ctx["client"].read_total_stake.assert_called_once_with(
+    ctx["client"].read_total_stake.assert_called_with(
         ["0xlarge", "0xsmall"],
         MOCK_STAKE_SCALED_CONFIG["HORIZON_STAKING_ADDRESS"],
         MOCK_STAKE_SCALED_CONFIG["SUBGRAPH_SERVICE_ADDRESS"],
@@ -345,26 +349,28 @@ def test_main_holds_each_indexer_to_its_stake_scaled_minimum(oracle_context):
 
 def test_main_checks_stake_can_be_read_before_querying_bigquery(oracle_context):
     """
-    Tests that the cheap stake check runs before the BigQuery query, and the full stake read after it,
-    once the query has said which indexers there are.
+    Tests that a stake read of an address with no stake, which touches both stake contracts, runs before
+    the BigQuery query, so a dead RPC or a wrong contract address fails the run before it is paid for.
     """
     ctx = oracle_context
     _scale_the_minimum_with_stake(ctx)
     order = []
     fetched = ctx["bq_provider"].fetch_indexer_daily_metrics.return_value
-    ctx["client"].read_delegation_ratio.side_effect = lambda *args, **kwargs: order.append("stake check") or 16
+    snapshots = iter([MOCK_STAKE_CHECK_SNAPSHOT, MOCK_STAKE_SNAPSHOT])
     ctx["bq_provider"].fetch_indexer_daily_metrics.side_effect = lambda *args, **kwargs: (
         order.append("query") or fetched
     )
-    ctx["client"].read_total_stake.side_effect = lambda *args, **kwargs: (
-        order.append("stake read") or MOCK_STAKE_SNAPSHOT
+    ctx["client"].read_total_stake.side_effect = lambda indexers, *args: (
+        order.append(f"stake of {indexers}") or next(snapshots)
     )
 
     ctx["main"]()
 
-    assert order == ["stake check", "query", "stake read"]
-    ctx["client"].read_delegation_ratio.assert_called_once_with(
-        MOCK_STAKE_SCALED_CONFIG["SUBGRAPH_SERVICE_ADDRESS"]
+    assert order == [f"stake of {['0x' + '0' * 40]}", "query", "stake of ['0xlarge', '0xsmall']"]
+    ctx["client"].read_total_stake.assert_any_call(
+        ["0x" + "0" * 40],
+        MOCK_STAKE_SCALED_CONFIG["HORIZON_STAKING_ADDRESS"],
+        MOCK_STAKE_SCALED_CONFIG["SUBGRAPH_SERVICE_ADDRESS"],
     )
 
 
@@ -375,7 +381,7 @@ def test_main_stops_before_querying_when_stake_cannot_be_read(oracle_context):
     ctx = oracle_context
     _scale_the_minimum_with_stake(ctx)
     error = ConnectionError("All RPC providers are unreachable.")
-    ctx["client"].read_delegation_ratio.side_effect = error
+    ctx["client"].read_total_stake.side_effect = error
 
     with pytest.raises(SystemExit) as excinfo:
         ctx["main"]()
@@ -393,7 +399,7 @@ def test_main_fails_when_stake_cannot_be_read_after_the_query(oracle_context):
     ctx = oracle_context
     _scale_the_minimum_with_stake(ctx)
     error = ConnectionError("All RPC providers are unreachable.")
-    ctx["client"].read_total_stake.side_effect = error
+    ctx["client"].read_total_stake.side_effect = [MOCK_STAKE_CHECK_SNAPSHOT, error]
 
     with pytest.raises(SystemExit) as excinfo:
         ctx["main"]()
@@ -415,7 +421,6 @@ def test_main_reads_no_stake_when_the_minimum_does_not_scale(oracle_context):
 
     ctx["main"]()
 
-    ctx["client"].read_delegation_ratio.assert_not_called()
     ctx["client"].read_total_stake.assert_not_called()
     summary = ctx["pipeline"].process.call_args.kwargs["input_data_from_bigquery"]
     assert summary.loc[0, "required_subgraphs"] == MOCK_CONFIG["MIN_SUBGRAPHS"]

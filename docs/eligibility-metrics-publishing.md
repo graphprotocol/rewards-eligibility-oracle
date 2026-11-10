@@ -97,7 +97,7 @@ rolling aggregate a consumer computes.
 ## Phase 1 — the per-day grid (implemented)
 
 Each run writes five files to `data/output/YYYY-MM-DD/` on a PVC (5 Gi, swept after
-`MAX_AGE_BEFORE_DELETION` = 120 days). Three existed before this work and keep their shape:
+`MAX_AGE_BEFORE_DELETION` = 120 days). Three existed before this work:
 `indexer_issuance_eligibility_data.csv` (window totals per indexer), `eligible_indexers.csv` and
 `ineligible_indexers.csv`. Phase 1 added two.
 
@@ -127,8 +127,9 @@ day,indexer,query_attempts,qualifying_queries,qualifying_subgraphs,failed_status
 The SQL that produces the counts is `BigQueryProvider._get_indexer_daily_metrics_query` in
 [`src/models/bigquery_provider.py`](../src/models/bigquery_provider.py), and `is_online_day` is set
 from them in pandas by `mark_online_days`. The window totals CSV is aggregated from the same rows, so
-there is one BigQuery scan. With `GRT_PER_SUBGRAPH` set, it also carries each indexer's
-`total_stake_grt` and `required_subgraphs`, and the run manifest records the block the stake was read at.
+there is one BigQuery scan. It also carries the subgraph count each indexer was held to, in
+`required_subgraphs`, and with `GRT_PER_SUBGRAPH` set, the indexer's `total_stake_grt`, while the
+run manifest records the block that stake was read at.
 
 ### `run_metadata.json`
 

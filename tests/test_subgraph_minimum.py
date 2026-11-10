@@ -41,13 +41,6 @@ def test_required_subgraphs_rounds_up_from_the_smallest_amount_over_a_step():
     assert required_subgraphs(exactly_40m + 1, MIN_SUBGRAPHS, GRT_PER_SUBGRAPH) == 11
 
 
-def test_required_subgraphs_is_min_subgraphs_when_the_minimum_does_not_scale():
-    """
-    Tests that without a GRT_PER_SUBGRAPH every indexer needs MIN_SUBGRAPHS, whatever its stake.
-    """
-    assert required_subgraphs(500_000_000 * WEI_PER_GRT, MIN_SUBGRAPHS, None) == MIN_SUBGRAPHS
-
-
 @pytest.mark.parametrize(
     "stake_wei, expected",
     [

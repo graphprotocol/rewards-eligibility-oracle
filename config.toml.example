@@ -59,7 +59,7 @@ MAX_LATENCY_MS = "5000"
 MAX_BLOCKS_BEHIND = "50000"
 # Scales the daily subgraph minimum with stake: 1 subgraph per this many GRT of total stake, rounded
 # up and never below MIN_SUBGRAPHS. Leave empty to hold every indexer to MIN_SUBGRAPHS.
-GRT_PER_SUBGRAPH = ""
+GRT_PER_SUBGRAPH = "4000000"
 
 # =============================================================================
 # SENSITIVE CONFIGURATION

@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 # limit on catching up missed runs, and keeps the payload far below a transaction's size limit.
 MAX_PUBLISH_CATCH_UP_DAYS = 7
 
+# An address with no stake, read before the query to check both stake contracts answer
+STAKE_CHECK_ADDRESS = "0x" + "0" * 40
+
 
 class RunProgress:
     """The stage an oracle run has reached, so a failure report can say where the run stopped."""
@@ -499,11 +502,14 @@ def _fetch_and_process_eligibility_data(
     config, credentials, pipeline, current_run_date, start_date, reason, progress, publication, blockchain_client
 ):
     """Fetch indexer performance from BigQuery and work out which indexers are eligible."""
-    # Stake is read straight after the query, so check the chain answers for it before paying for the query
+    # Stake is read straight after the query, so before paying for the query, read it for an address with
+    # none. That touches both stake contracts, so a dead RPC or a wrong contract address fails the run here.
     if config.get("GRT_PER_SUBGRAPH") is not None:
         progress.stage = "Stake Check"
-        delegation_ratio = blockchain_client.read_delegation_ratio(config["SUBGRAPH_SERVICE_ADDRESS"])
-        logger.info(f"Stake can be read: the SubgraphService counts delegation up to {delegation_ratio}x")
+        check = blockchain_client.read_total_stake(
+            [STAKE_CHECK_ADDRESS], config["HORIZON_STAKING_ADDRESS"], config["SUBGRAPH_SERVICE_ADDRESS"]
+        )
+        logger.info(f"Stake can be read: delegation counts up to {check.delegation_ratio}x the provision")
 
     # --- Fresh Data Path (BigQuery + Processing) ---
     progress.stage = "Data Fetching from BigQuery"

@@ -11,11 +11,11 @@ tenacity==9.2.1
 
 # Google Cloud BigQuery for data processing
 google-cloud-bigquery==3.47.0
-bigframes==2.52.0
+bigframes==2.53.0
 
 # Data processing and validation
 pandas==3.1.1
-pandera==0.35.0
+pandera==0.36.0
 numpy==2.5.4
 
 # Blockchain integration - Latest compatible versions
@@ -40,4 +40,4 @@ types-pytz==2026.6.0.20261031
 types-requests==2.33.0.20261030
 
 # Linting and formatting
-ruff==0.17.4
+ruff==0.17.5

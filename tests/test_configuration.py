@@ -53,6 +53,10 @@ MOCK_TOML_NULL_INT = """
 # MIN_ONLINE_DAYS is intentionally omitted to test None default
 """
 
+# The Arbitrum One contracts each indexer's stake is read from
+MOCK_STAKING_ADDRESS = "0x00669A4CF01450B64E8A2A20E9b1FCB71E61eF03"
+MOCK_SUBGRAPH_SERVICE_ADDRESS = "0xb2Bb92d0DE618878E438b55D5846cfecD9301105"
+
 MOCK_SERVICE_ACCOUNT_JSON = (
     '{"type": "service_account", "private_key": "pk", "client_email": "ce", "project_id": "pi"}'
 )
@@ -189,6 +193,33 @@ class TestConfigLoader:
 
         # Publishing days has a default of its own, so publishing works with only an address set
         assert config["DATA_EDGE_PUBLISH_DAYS"] == 2
+
+        # The subgraph minimum does not scale with stake unless a divisor is set
+        assert config["GRT_PER_SUBGRAPH"] is None
+
+
+    def test_load_config_reads_the_stake_scaled_minimum(self, tmp_path: Path):
+        """
+        GIVEN a config file setting GRT_PER_SUBGRAPH and the contracts stake is read from
+        WHEN the config is loaded
+        THEN the divisor is a whole number of GRT and the addresses come through as written.
+        """
+        # Arrange
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            '[eligibility_criteria]\nGRT_PER_SUBGRAPH = "4000000"\n'
+            f'[blockchain]\nHORIZON_STAKING_ADDRESS = "{MOCK_STAKING_ADDRESS}"\n'
+            f'SUBGRAPH_SERVICE_ADDRESS = "{MOCK_SUBGRAPH_SERVICE_ADDRESS}"\n'
+        )
+        loader = ConfigLoader(config_path=str(config_path))
+
+        # Act
+        config = loader.get_flat_config()
+
+        # Assert
+        assert config["GRT_PER_SUBGRAPH"] == 4_000_000
+        assert config["HORIZON_STAKING_ADDRESS"] == MOCK_STAKING_ADDRESS
+        assert config["SUBGRAPH_SERVICE_ADDRESS"] == MOCK_SUBGRAPH_SERVICE_ADDRESS
 
 
     def test_load_config_carries_the_opsgenie_key_through(self, tmp_path: Path, monkeypatch):
@@ -549,6 +580,72 @@ class TestConfigValidation:
         """
         # Arrange
         config = {**full_valid_config, "DATA_EDGE_CONTRACT_ADDRESS": "", "DATA_EDGE_PUBLISH_DAYS": 0}
+
+        # Act & Assert
+        _validate_config(config)  # Should not raise
+
+
+    @pytest.mark.parametrize(
+        "overrides, message",
+        [
+            ({"GRT_PER_SUBGRAPH": 0}, "Invalid GRT_PER_SUBGRAPH"),
+            ({"GRT_PER_SUBGRAPH": -4_000_000}, "Invalid GRT_PER_SUBGRAPH"),
+            ({"HORIZON_STAKING_ADDRESS": None}, "Invalid HORIZON_STAKING_ADDRESS"),
+            ({"HORIZON_STAKING_ADDRESS": "0x1234"}, "Invalid HORIZON_STAKING_ADDRESS"),
+            ({"SUBGRAPH_SERVICE_ADDRESS": ""}, "Invalid SUBGRAPH_SERVICE_ADDRESS"),
+        ],
+        ids=["zero_divisor", "negative_divisor", "missing_staking", "short_staking", "missing_service"],
+    )
+    def test_validate_config_fails_on_invalid_stake_scaling_settings(
+        self, full_valid_config: dict, overrides: dict, message: str
+    ):
+        """
+        GIVEN the stake-scaled minimum switched on with an invalid setting
+        WHEN _validate_config is called
+        THEN it should raise at startup, rather than when the first run tries to read stake.
+        """
+        # Arrange
+        config = {
+            **full_valid_config,
+            "GRT_PER_SUBGRAPH": 4_000_000,
+            "HORIZON_STAKING_ADDRESS": MOCK_STAKING_ADDRESS,
+            "SUBGRAPH_SERVICE_ADDRESS": MOCK_SUBGRAPH_SERVICE_ADDRESS,
+            **overrides,
+        }
+
+        # Act & Assert
+        with pytest.raises(ConfigurationError, match=message):
+            _validate_config(config)
+
+
+    def test_validate_config_accepts_the_stake_scaled_minimum(self, full_valid_config: dict):
+        """
+        GIVEN the stake-scaled minimum switched on with a divisor and both contract addresses
+        WHEN _validate_config is called
+        THEN it should not raise.
+        """
+        # Arrange
+        config = {
+            **full_valid_config,
+            "GRT_PER_SUBGRAPH": 4_000_000,
+            "HORIZON_STAKING_ADDRESS": MOCK_STAKING_ADDRESS,
+            "SUBGRAPH_SERVICE_ADDRESS": MOCK_SUBGRAPH_SERVICE_ADDRESS,
+        }
+
+        # Act & Assert
+        _validate_config(config)  # Should not raise
+
+
+    def test_validate_config_ignores_stake_contracts_when_the_minimum_does_not_scale(
+        self, full_valid_config: dict
+    ):
+        """
+        GIVEN no GRT_PER_SUBGRAPH, so the minimum does not scale with stake
+        WHEN _validate_config is called with contract addresses that would otherwise be invalid
+        THEN it should not raise, since stake is never read.
+        """
+        # Arrange
+        config = {**full_valid_config, "GRT_PER_SUBGRAPH": None, "HORIZON_STAKING_ADDRESS": "0x1234"}
 
         # Act & Assert
         _validate_config(config)  # Should not raise

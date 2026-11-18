@@ -32,6 +32,11 @@ TX_TIMEOUT_SECONDS = "30"
 # the window each run republishes, which lets the next run restate a day that was still in progress.
 DATA_EDGE_CONTRACT_ADDRESS = ""
 DATA_EDGE_PUBLISH_DAYS = "2"
+# The contracts each indexer's total stake is read from, needed only when GRT_PER_SUBGRAPH is set.
+# These are Arbitrum Sepolia's. On Arbitrum One they are 0x00669A4CF01450B64E8A2A20E9b1FCB71E61eF03
+# (HorizonStaking) and 0xb2Bb92d0DE618878E438b55D5846cfecD9301105 (SubgraphService).
+HORIZON_STAKING_ADDRESS = "0x865365C425f3A593Ffe698D9c4E6707D14d51e08"
+SUBGRAPH_SERVICE_ADDRESS = "0xc24A3dAC5d06d771f657A48B20cE1a671B78f26b"
 
 [scheduling]
 SCHEDULED_RUN_TIME = "10:00"
@@ -52,6 +57,9 @@ MIN_ONLINE_DAYS = "5"
 MIN_SUBGRAPHS = "10"
 MAX_LATENCY_MS = "5000"
 MAX_BLOCKS_BEHIND = "50000"
+# Scales the daily subgraph minimum with stake: 1 subgraph per this many GRT of total stake, rounded
+# up and never below MIN_SUBGRAPHS. Leave empty to hold every indexer to MIN_SUBGRAPHS.
+GRT_PER_SUBGRAPH = ""
 
 # =============================================================================
 # SENSITIVE CONFIGURATION

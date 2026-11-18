@@ -577,6 +577,50 @@ def test_write_run_metadata_records_the_criteria_that_produced_the_run(pipeline:
     assert metadata["indexers_eligible"] == 1
 
 
+def test_write_run_metadata_records_where_stake_was_read(pipeline: EligibilityPipeline):
+    """
+    Tests that a run holding indexers to a stake-scaled minimum records the block and delegation ratio
+    its stake was read at, so anyone can read the same stake again and check the required counts.
+    """
+    # Arrange
+    current_date_val = date(2025, 1, 3)
+
+    # Act
+    path = pipeline.write_run_metadata(
+        current_date=current_date_val,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        criteria={"MIN_SUBGRAPHS": 10, "GRT_PER_SUBGRAPH": 4_000_000},
+        source="bigquery",
+        indexers_evaluated=2,
+        indexers_eligible=1,
+        stake_read={"block_number": 523_012_669, "delegation_ratio": 16},
+    )
+
+    # Assert
+    metadata = json.loads(path.read_text())
+    assert metadata["stake_read"] == {"block_number": 523_012_669, "delegation_ratio": 16}
+
+
+def test_write_run_metadata_records_no_stake_read_by_default(pipeline: EligibilityPipeline):
+    """
+    Tests that a run that read no stake says so, rather than leaving the field out.
+    """
+    # Act
+    path = pipeline.write_run_metadata(
+        current_date=date(2025, 1, 3),
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        criteria={"MIN_SUBGRAPHS": 10},
+        source="bigquery",
+        indexers_evaluated=2,
+        indexers_eligible=1,
+    )
+
+    # Assert
+    assert json.loads(path.read_text())["stake_read"] is None
+
+
 def test_write_run_metadata_starts_with_no_published_transaction(pipeline: EligibilityPipeline):
     """
     Tests that a fresh manifest records that its metrics have still to reach the chain, which is what

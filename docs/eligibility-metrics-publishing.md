@@ -97,7 +97,7 @@ rolling aggregate a consumer computes.
 ## Phase 1 — the per-day grid (implemented)
 
 Each run writes five files to `data/output/YYYY-MM-DD/` on a PVC (5 Gi, swept after
-`MAX_AGE_BEFORE_DELETION` = 120 days). Three existed before this work and keep their shape:
+`MAX_AGE_BEFORE_DELETION` = 120 days). Three existed before this work:
 `indexer_issuance_eligibility_data.csv` (window totals per indexer), `eligible_indexers.csv` and
 `ineligible_indexers.csv`. Phase 1 added two.
 
@@ -122,11 +122,14 @@ day,indexer,query_attempts,qualifying_queries,qualifying_subgraphs,failed_status
 | `failed_status` | attempts where `status != '200 OK'` |
 | `failed_latency` | attempts where `response_time_ms >= MAX_LATENCY_MS` |
 | `failed_blocks_behind` | attempts where `blocks_behind >= MAX_BLOCKS_BEHIND` |
-| `is_online_day` | 1 when `qualifying_queries >= 1 AND qualifying_subgraphs >= MIN_SUBGRAPHS`, under the thresholds active for that run |
+| `is_online_day` | 1 when `qualifying_queries >= 1 AND qualifying_subgraphs >=` the indexer's required count, under the thresholds active for that run. The count is `MIN_SUBGRAPHS`, or with `GRT_PER_SUBGRAPH` set, the greater of that and the indexer's total stake divided by `GRT_PER_SUBGRAPH`, rounded up |
 
-The SQL that produces these is `BigQueryProvider._get_indexer_daily_metrics_query` in
-[`src/models/bigquery_provider.py`](../src/models/bigquery_provider.py). The window totals CSV is
-aggregated from the same rows in pandas, so there is one BigQuery scan.
+The SQL that produces the counts is `BigQueryProvider._get_indexer_daily_metrics_query` in
+[`src/models/bigquery_provider.py`](../src/models/bigquery_provider.py), and `is_online_day` is set
+from them in pandas by `mark_online_days`. The window totals CSV is aggregated from the same rows, so
+there is one BigQuery scan. It also carries the subgraph count each indexer was held to, in
+`required_subgraphs`, and with `GRT_PER_SUBGRAPH` set, the indexer's `total_stake_grt`, while the
+run manifest records the block that stake was read at.
 
 ### `run_metadata.json`
 
@@ -400,7 +403,8 @@ Three properties to keep if the format is revised:
   not carry a sender.
 - **Criteria on every payload**, not only when they change. It costs ~6 bytes and makes each payload
   interpretable with no prior state: `is_online_day` means nothing without the thresholds that
-  produced it.
+  produced it. Version 1 does not yet hold to this once `GRT_PER_SUBGRAPH` is set, since the
+  required count then differs per indexer and the payload carries only `MIN_SUBGRAPHS`, the floor.
 - **An explicit version**, refused rather than guessed at when unrecognised. The subgraph is a
   deployed artifact that cannot be retroactively fixed.
 

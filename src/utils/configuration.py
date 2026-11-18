@@ -153,6 +153,10 @@ class ConfigLoader:
             "MAX_BLOCKS_BEHIND": to_int(
                 substituted_config.get("eligibility_criteria", {}).get("MAX_BLOCKS_BEHIND")
             ),
+            # Optional: leaving it unset holds every indexer to MIN_SUBGRAPHS, whatever its stake
+            "GRT_PER_SUBGRAPH": to_int(
+                substituted_config.get("eligibility_criteria", {}).get("GRT_PER_SUBGRAPH")
+            ),
 
             # Blockchain settings
             "BLOCKCHAIN_CONTRACT_ADDRESS": substituted_config.get("blockchain", {}).get(
@@ -165,6 +169,10 @@ class ConfigLoader:
             ),
             "BLOCK_EXPLORER_URL": substituted_config.get("blockchain", {}).get("BLOCK_EXPLORER_URL"),
             "TX_TIMEOUT_SECONDS": to_int(substituted_config.get("blockchain", {}).get("TX_TIMEOUT_SECONDS")),
+
+            # Contracts each indexer's stake is read from, needed only once GRT_PER_SUBGRAPH is set
+            "HORIZON_STAKING_ADDRESS": substituted_config.get("blockchain", {}).get("HORIZON_STAKING_ADDRESS"),
+            "SUBGRAPH_SERVICE_ADDRESS": substituted_config.get("blockchain", {}).get("SUBGRAPH_SERVICE_ADDRESS"),
 
             # DataEdge publishing. Optional: leaving the address unset disables publishing entirely.
             "DATA_EDGE_CONTRACT_ADDRESS": substituted_config.get("blockchain", {}).get(
@@ -249,6 +257,13 @@ class ConfigLoader:
         return self._collect_missing_env_vars(raw_config)
 
 
+def _require_address(config: dict[str, Any], key: str) -> None:
+    """Raise unless config[key] is a contract address: 0x followed by 40 hex characters."""
+    address = config.get(key)
+    if not address or not re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
+        raise ConfigurationError(f"Invalid {key}: {address} - must be 0x followed by 40 hex characters.")
+
+
 def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
     # Define required fields. All other fields from `get_flat_config` are considered optional.
     required = [
@@ -292,17 +307,25 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
         )
 
     # DataEdge publishing is optional, so its settings are only checked once an address switches it on
-    data_edge_address = config.get("DATA_EDGE_CONTRACT_ADDRESS")
-    if data_edge_address:
-        if not re.fullmatch(r"0x[0-9a-fA-F]{40}", data_edge_address):
-            raise ConfigurationError(
-                f"Invalid DATA_EDGE_CONTRACT_ADDRESS: {data_edge_address} - "
-                "must be 0x followed by 40 hex characters."
-            )
+    if config.get("DATA_EDGE_CONTRACT_ADDRESS"):
+        _require_address(config, "DATA_EDGE_CONTRACT_ADDRESS")
 
         publish_days = config.get("DATA_EDGE_PUBLISH_DAYS")
         if publish_days is None or publish_days < 1:
             raise ConfigurationError(f"Invalid DATA_EDGE_PUBLISH_DAYS: {publish_days} - must be at least 1.")
+
+    # The stake-scaled minimum is optional too, so the contracts stake is read from are only checked once
+    # a divisor switches it on
+    grt_per_subgraph = config.get("GRT_PER_SUBGRAPH")
+    if grt_per_subgraph is not None:
+        if grt_per_subgraph < 1:
+            raise ConfigurationError(
+                f"Invalid GRT_PER_SUBGRAPH: {grt_per_subgraph} - must be at least 1, "
+                "or empty to hold every indexer to MIN_SUBGRAPHS."
+            )
+
+        _require_address(config, "HORIZON_STAKING_ADDRESS")
+        _require_address(config, "SUBGRAPH_SERVICE_ADDRESS")
 
     return config
 

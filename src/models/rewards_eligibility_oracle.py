@@ -504,6 +504,8 @@ def _fetch_and_process_eligibility_data(
     daily_metrics = bigquery_provider.fetch_indexer_daily_metrics(start_date, end_date)
     logger.info(f"Successfully fetched {len(daily_metrics)} daily metric rows from BigQuery.")
 
+    daily_metrics = bigquery_provider.mark_online_days(daily_metrics)
+
     eligibility_data = bigquery_provider.aggregate_daily_metrics(daily_metrics)
     logger.info(f"Aggregated daily metrics for {len(eligibility_data)} indexers.")
 

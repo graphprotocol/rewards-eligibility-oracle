@@ -4,7 +4,7 @@ A provider for accessing Google BigQuery data for the Rewards Eligibility Oracle
 
 import logging
 from datetime import date
-from typing import Optional, cast
+from typing import Mapping, Optional, cast
 
 import google.auth.credentials
 import pandas as pd
@@ -44,8 +44,9 @@ class BigQueryProvider:
         """
         Initialize BigQuery provider for a GCP project, location (e.g. 'US') and fully qualified table name.
 
-        The min_* and max_* params are the eligibility thresholds applied by the eligibility query.
-        If credentials is None, Application Default Credentials (ADC) are used.
+        The max_* params are the quality bars the query applies to each response; min_subgraphs and
+        min_online_days are applied afterwards, in Python. If credentials is None, Application Default
+        Credentials (ADC) are used.
         """
         # Configure BigQuery connection globally for all SQL queries to BigQuery
         bpd.options.bigquery.location = location
@@ -81,11 +82,12 @@ class BigQueryProvider:
     def _get_indexer_daily_metrics_query(self, start_date: date, end_date: date) -> str:
         """
         Build the SQL query returning one row per indexer per day between start_date and end_date.
-        A day counts as online if the indexer served >= 1 qualifying query on each of >= min_subgraphs
-        subgraphs. A qualifying query has HTTP status '200 OK', latency below max_latency_ms and fewer
-        than max_blocks_behind blocks behind chainhead. The per-criterion failure counts overlap, since
-        one response can breach several bars at once. The window-level distinct subgraph count cannot be
-        derived from per-day counts, so it is carried on every row of an indexer.
+        A qualifying query has HTTP status '200 OK', latency below max_latency_ms and fewer than
+        max_blocks_behind blocks behind chainhead. Whether a day counts as online is left to
+        mark_online_days, since the subgraph minimum can differ between indexers. The per-criterion
+        failure counts overlap, since one response can breach several bars at once. The window-level
+        distinct subgraph count cannot be derived from per-day counts, so it is carried on every row of
+        an indexer.
         """
         start_date_str = start_date.strftime("%Y-%m-%d")
         end_date_str = end_date.strftime("%Y-%m-%d")
@@ -132,8 +134,7 @@ class BigQueryProvider:
             GROUP BY
                 indexer
         )
-        -- Per-day rows, flagging the days that count as online (>= 1 qualifying query on each of
-        -- >= {self.min_subgraphs} subgraphs)
+        -- Per-day rows, with the window's distinct subgraph count repeated on each
         SELECT
             m.day,
             m.indexer,
@@ -143,9 +144,6 @@ class BigQueryProvider:
             m.failed_status,
             m.failed_latency,
             m.failed_blocks_behind,
-            CASE WHEN m.qualifying_queries >= 1 AND m.qualifying_subgraphs >= {self.min_subgraphs}
-                THEN 1 ELSE 0
-            END AS is_online_day,
             u.unique_good_response_subgraphs
         FROM
             DailyMetrics m
@@ -160,9 +158,9 @@ class BigQueryProvider:
         """
         Fetch per-indexer, per-day metrics from BigQuery for start_date to end_date.
         Returns a DataFrame with columns day, indexer, query_attempts, qualifying_queries,
-        qualifying_subgraphs, failed_status, failed_latency, failed_blocks_behind, is_online_day and
-        unique_good_response_subgraphs. Days on which an indexer received no query attempts are absent,
-        since the source table only records attempts.
+        qualifying_subgraphs, failed_status, failed_latency, failed_blocks_behind and
+        unique_good_response_subgraphs; mark_online_days adds is_online_day. Days on which an indexer
+        received no query attempts are absent, since the source table only records attempts.
         """
         # Construct the query
         query = self._get_indexer_daily_metrics_query(start_date=start_date, end_date=end_date)
@@ -171,11 +169,48 @@ class BigQueryProvider:
         return self._read_gbq_dataframe(query)
 
 
+    def mark_online_days(
+        self, daily_metrics: DataFrame, required_subgraphs: Optional[Mapping[str, int]] = None
+    ) -> DataFrame:
+        """
+        Return a copy of daily_metrics with is_online_day set to 1 on each day that counts as online.
+
+        A day is online when the indexer served at least 1 qualifying query, on each of at least as many
+        subgraphs as it is required to serve. That is min_subgraphs for every indexer, unless
+        required_subgraphs gives each indexer its own count, in which case it must cover them all.
+
+        Raises:
+            ValueError: If required_subgraphs leaves out an indexer present in daily_metrics
+        """
+        marked = daily_metrics.copy()
+
+        # A window with no rows has nothing to judge, but still needs the column the grid validates against
+        if marked.empty:
+            marked["is_online_day"] = pd.Series(dtype="int64")
+            return cast(DataFrame, marked)
+
+        # Every indexer is held to the same minimum unless each was given its own
+        if required_subgraphs is None:
+            required = pd.Series(self.min_subgraphs, index=marked.index)
+
+        # A missing indexer would otherwise be judged against nothing, so refuse rather than guess
+        else:
+            required = marked["indexer"].map(required_subgraphs)
+            missing = sorted(marked.loc[required.isna(), "indexer"].unique())
+            if missing:
+                raise ValueError(f"No required subgraph count for indexers: {', '.join(missing)}")
+
+        online = (marked["qualifying_queries"] >= 1) & (marked["qualifying_subgraphs"] >= required)
+        marked["is_online_day"] = online.astype("int64")
+
+        return cast(DataFrame, marked)
+
+
     def aggregate_daily_metrics(self, daily_metrics: DataFrame) -> DataFrame:
         """
-        Collapse per-day metrics into one row per indexer and determine rewards eligibility.
-        An indexer is eligible once its online days reach min_online_days. Returns a DataFrame with
-        columns indexer, query_attempts, good_responses, total_good_days_online,
+        Collapse per-day metrics, already marked by mark_online_days, into one row per indexer and
+        determine rewards eligibility. An indexer is eligible once its online days reach min_online_days.
+        Returns a DataFrame with columns indexer, query_attempts, good_responses, total_good_days_online,
         unique_good_response_subgraphs and eligible_for_indexing_rewards (1 if eligible, else 0).
 
         Covers exactly the indexers present in daily_metrics, which are those that received at least

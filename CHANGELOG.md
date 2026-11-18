@@ -5,6 +5,33 @@ All notable changes to the Rewards Eligibility Oracle project will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.15](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.14...v0.4.15) (2026-11-18)
+
+
+### Added
+
+* hold each indexer to a subgraph minimum set by its stake ([#194](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/194)) ([c9bf624](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/c9bf624ae629764c729f07c5b7b7132d22a29eaf))
+* read each indexer's total stake from the chain ([#193](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/193)) ([27ef6c1](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/27ef6c15d825f8e816197e7da2b0647745ade649))
+
+
+### Changed
+
+* allow a different subgraph minimum for each indexer ([#192](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/192)) ([f3ff99f](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/f3ff99f4b41e59e213e26f352b7cdc135a064b73))
+* **ci:** run CI on Python 3.14 so it works on Ubuntu 26.04 ([#187](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/187)) ([7056a13](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/7056a1327aca9eec9c2413aa726836219e4300ef))
+* **deps:** Bump the python-dependencies group with 3 updates ([#197](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/197)) ([565ffb1](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/565ffb1b3ee09e1f9f3c9e48e1fd1c1ec30e6aa0))
+* **deps:** Bump types-requests from 2.33.0.20260906 to 2.33.0.20261030 ([#185](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/185)) ([d50909f](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/d50909fb72e7aa21b8e464dabaf93b001b94c774))
+
+
+### Documentation
+
+* announce stake-scaled subgraph minimum from 2026-11-17 ([#186](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/186)) ([88fb34c](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/88fb34c13a83e854466518564a3e3c308a71f0fa))
+* mark the stake-scaled subgraph minimum as active ([#195](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/195)) ([96693d3](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/96693d3795adfdcea637ab6bb9593b81471ff03f))
+
+
+### Tests
+
+* stop pytest 9.2 running out of memory collecting tests ([#190](https://github.com/graphprotocol/rewards-eligibility-oracle/issues/190)) ([3813485](https://github.com/graphprotocol/rewards-eligibility-oracle/commit/38134851cf7d1a9e7eb385514ceb2b5790f12ae9))
+
 ## [0.4.14](https://github.com/graphprotocol/rewards-eligibility-oracle/compare/v0.4.13...v0.4.14) (2026-10-27)
 
 

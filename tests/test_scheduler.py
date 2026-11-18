@@ -5,7 +5,7 @@ Unit tests for the Scheduler, organized for clarity and complete coverage.
 import sys
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 from tenacity import wait_fixed
@@ -396,6 +396,10 @@ class TestSchedulerRunLoop:
         self, scheduler: Scheduler, mock_dependencies: SimpleNamespace
     ):
         """Tests that the run loop correctly calls schedule and sleeps."""
+        # Imported here, since a module-level call sends pytest 9.2 collection down an endless __wrapped__
+        # chain that py_ecc's raised recursion limit lets grow until memory runs out
+        from unittest.mock import call
+
         mock_dependencies.schedule.run_pending.side_effect = [None, None, KeyboardInterrupt]
         scheduler.update_healthcheck = MagicMock()
 

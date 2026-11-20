@@ -1303,15 +1303,23 @@ class TestProviderRejectionRotation:
         return raised.value
 
 
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ZAN_REFUSAL,
+            # A refusal sent with null data, which web3 also raises as a revert
+            {"code": -32005, "message": "daily request limit reached", "data": None},
+        ],
+    )
     def test_provider_refusal_reported_as_revert_rotates_to_next_provider(
-        self, blockchain_client: BlockchainClient
+        self, blockchain_client: BlockchainClient, error: dict
     ):
         """
         Tests that a provider refusing a contract call rotates to the next provider, even though web3
-        reports the refusal as a revert because the error carries an object as its data.
+        reports the refusal as a revert because the error carries an object or null as its data.
         """
         # Arrange
-        refusal = self._web3_contract_error(self.ZAN_REFUSAL)
+        refusal = self._web3_contract_error(error)
         mock_func = MagicMock(side_effect=[refusal, "Success"])
         blockchain_client.slack_notifier.reset_mock()
 
@@ -1341,12 +1349,24 @@ class TestProviderRejectionRotation:
             # A node that reports a revert with no data at all
             {"code": -32000, "message": "execution reverted"},
             {"code": -32000, "message": "execution reverted", "data": None},
+            # Code 3 marks an execution error even when the message does not mention a revert
+            {"code": 3, "message": "out of gas"},
+            # Revert data sent without its 0x prefix
+            {
+                "code": 3,
+                "message": "execution reverted",
+                "data": "08c379a0" + encode(["string"], ["not authorized"]).hex(),
+            },
+            # Chain-level errors that every provider would give, with null or object data
+            {"code": -32000, "message": "insufficient funds for gas * price + value", "data": None},
+            {"code": -32000, "message": "insufficient funds for gas * price + value", "data": {"id": "1"}},
+            {"code": -32000, "message": "nonce too low", "data": None},
         ],
     )
-    def test_contract_reverts_do_not_rotate(self, blockchain_client: BlockchainClient, error: dict):
+    def test_contract_and_chain_errors_do_not_rotate(self, blockchain_client: BlockchainClient, error: dict):
         """
-        Tests that a call the contract itself reverts re-raises without rotation, since every
-        provider would revert it the same way.
+        Tests that a call the contract itself reverts, or that fails for a reason every provider shares,
+        re-raises without rotation, since every provider would give the same answer.
         """
         # Arrange
         mock_func = MagicMock(side_effect=self._web3_contract_error(error))

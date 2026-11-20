@@ -28,16 +28,17 @@ CHAIN_LEVEL_ERROR_PATTERNS = NONCE_ERROR_PATTERNS + (
 
 def is_provider_refusal(error: ContractLogicError) -> bool:
     """
-    Tell a provider refusing a contract call, such as a free plan not allowing it, apart from a real revert.
+    Tell a provider refusing a contract call, such as a free plan not allowing it, apart from a real failure.
 
-    web3 raises ContractLogicError for both. A real revert carries hex revert data or says it reverted; when
-    the data is an object, web3 puts "execution reverted: " before the provider's own message, so it is dropped.
+    web3 raises ContractLogicError for both. Text data means revert data or a code 3 execution error, so only
+    null or object data can be a refusal, and then only if the message names no revert or chain-level error.
     """
-    if isinstance(error.data, str) and error.data.startswith("0x"):
+    if not (error.data is None or isinstance(error.data, dict)):
         return False
 
-    message = error.message or ""
+    # web3 puts "execution reverted: " before the provider's own message when the data is an object
+    message = (error.message or "").lower()
     if isinstance(error.data, dict):
         message = message.removeprefix("execution reverted: ")
 
-    return "revert" not in message.lower()
+    return "revert" not in message and not any(pattern in message for pattern in CHAIN_LEVEL_ERROR_PATTERNS)

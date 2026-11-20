@@ -289,7 +289,9 @@ class BlockchainClient:
         # Once every provider in the pool has failed, log the error and raise an exception
         if providers_tried >= len(self.rpc_providers):
             logger.error("All RPC providers failed. Cannot proceed.")
-            raise ConnectionError("All RPC providers are unreachable.") from error
+            raise ConnectionError(
+                f"All {len(self.rpc_providers)} RPC providers failed or refused the call. Last error: {error}"
+            ) from error
 
         self._get_next_rpc_provider()
         return providers_tried

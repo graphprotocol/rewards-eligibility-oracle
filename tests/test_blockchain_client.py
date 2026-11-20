@@ -260,7 +260,9 @@ class TestInitializationAndConnection:
         mocker.patch.object(blockchain_client, "_get_next_rpc_provider", side_effect=rotate_skipping_primary)
 
         # Act & Assert
-        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+        with pytest.raises(
+            requests.exceptions.ConnectionError, match="All 2 RPC providers failed or refused the call"
+        ):
             blockchain_client._execute_rpc_call(mock_func)
 
         # Each of the 2 providers gets 3 retry attempts before the pool is exhausted
@@ -720,7 +722,9 @@ class TestTransactionLogic:
         )
 
         # Act & Assert - TransactionNotFound triggers RPC failover, eventually raising requests.ConnectionError
-        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+        with pytest.raises(
+            requests.exceptions.ConnectionError, match="All 2 RPC providers failed or refused the call"
+        ):
             blockchain_client._send_signed_transaction(mock_signed_tx)
 
 
@@ -1405,8 +1409,8 @@ class TestProviderRejectionRotation:
         # Arrange
         mock_func = MagicMock(side_effect=Web3RPCError(self.QUOTA_ERROR))
 
-        # Act & Assert
-        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+        # Act & Assert: the message names the last refusal, since every provider answered
+        with pytest.raises(requests.exceptions.ConnectionError, match="failed or refused the call.*usage limit"):
             blockchain_client._execute_rpc_call(mock_func)
 
         # 1 call per provider in the 2-provider pool
@@ -1538,7 +1542,9 @@ class TestStakeReads:
         functions.getDelegationRatio.return_value.call.return_value = 16
         functions.getTokensAvailable.return_value.call.side_effect = requests.exceptions.HTTPError("429")
 
-        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+        with pytest.raises(
+            requests.exceptions.ConnectionError, match="All 2 RPC providers failed or refused the call"
+        ):
             blockchain_client.read_total_stake(["0xindexer"], self.STAKING_ADDRESS, self.SUBGRAPH_SERVICE_ADDRESS)
 
 

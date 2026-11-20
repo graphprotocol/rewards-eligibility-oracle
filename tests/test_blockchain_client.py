@@ -1364,6 +1364,19 @@ class TestProviderRejectionRotation:
             {"code": -32000, "message": "insufficient funds for gas * price + value", "data": None},
             {"code": -32000, "message": "insufficient funds for gas * price + value", "data": {"id": "1"}},
             {"code": -32000, "message": "nonce too low", "data": None},
+            # An execution failure sent with null data, where web3 drops the code 3 that marks it
+            {"code": 3, "message": "out of gas", "data": None},
+            # A revert a proxy wraps inside object data
+            {
+                "code": -32603,
+                "message": "Internal JSON-RPC error.",
+                "data": {"data": "0x08c379a0" + encode(["string"], ["not authorized"]).hex()},
+            },
+            {
+                "code": -32603,
+                "message": "Internal JSON-RPC error.",
+                "data": {"message": "VM Exception while processing transaction: reverted with reason string"},
+            },
         ],
     )
     def test_contract_and_chain_errors_do_not_rotate(self, blockchain_client: BlockchainClient, error: dict):

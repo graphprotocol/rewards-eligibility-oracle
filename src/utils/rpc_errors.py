@@ -26,19 +26,43 @@ CHAIN_LEVEL_ERROR_PATTERNS = NONCE_ERROR_PATTERNS + (
 )
 
 
+# Wording providers use when turning a call away, such as a plan without the method or a used-up quota
+# (case-insensitive). An error with null data counts as a refusal only when it matches, since web3 drops
+# the JSON-RPC code that would tell it apart from an execution failure such as running out of gas.
+PROVIDER_REFUSAL_PATTERNS = (
+    "not available",
+    "not supported",
+    "not allowed",
+    "limit",
+    "quota",
+    "unauthorized",
+    "forbidden",
+    "api key",
+    "upgrade",
+    "register",
+    "too many requests",
+)
+
+
 def is_provider_refusal(error: ContractLogicError) -> bool:
     """
     Tell a provider refusing a contract call, such as a free plan not allowing it, apart from a real failure.
 
-    web3 raises ContractLogicError for both. Text data means revert data or a code 3 execution error, so only
-    null or object data can be a refusal, and then only if the message names no revert or chain-level error.
+    web3 raises ContractLogicError for both and drops the JSON-RPC code, so this reads the data: text is revert
+    data, an object is the provider's own detail unless it holds revert data, and null needs refusal wording.
     """
-    if not (error.data is None or isinstance(error.data, dict)):
+    if error.data is not None and not isinstance(error.data, dict):
         return False
 
     # web3 puts "execution reverted: " before the provider's own message when the data is an object
     message = (error.message or "").lower()
     if isinstance(error.data, dict):
         message = message.removeprefix("execution reverted: ")
+        details = str(error.data).lower()
+        if "revert" in details or "0x" in details:
+            return False
 
-    return "revert" not in message and not any(pattern in message for pattern in CHAIN_LEVEL_ERROR_PATTERNS)
+    if "revert" in message or any(pattern in message for pattern in CHAIN_LEVEL_ERROR_PATTERNS):
+        return False
+
+    return isinstance(error.data, dict) or any(pattern in message for pattern in PROVIDER_REFUSAL_PATTERNS)

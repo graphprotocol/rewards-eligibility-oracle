@@ -1409,8 +1409,10 @@ class TestProviderRejectionRotation:
         # Arrange
         mock_func = MagicMock(side_effect=Web3RPCError(self.QUOTA_ERROR))
 
-        # Act & Assert: the message names the last refusal, since every provider answered
-        with pytest.raises(requests.exceptions.ConnectionError, match="failed or refused the call.*usage limit"):
+        # Act & Assert
+        with pytest.raises(
+            requests.exceptions.ConnectionError, match="All 2 RPC providers failed or refused the call"
+        ):
             blockchain_client._execute_rpc_call(mock_func)
 
         # 1 call per provider in the 2-provider pool

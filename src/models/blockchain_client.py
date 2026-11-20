@@ -232,6 +232,8 @@ class BlockchainClient:
         """
         Execute func(*args, **kwargs) with retries and provider failover, rotating
         through the RPC pool and raising ConnectionError once every provider has failed.
+        func must read self.w3 when called, as a lambda does: a method taken from self.w3 beforehand
+        stays tied to that provider, so retries after rotating would go back to it.
         """
         providers_tried = 0
         while True:
@@ -391,7 +393,7 @@ class BlockchainClient:
 
     def _estimate_transaction_gas(
         self,
-        contract_func: Any,
+        contract_function_name: str,
         indexer_addresses: List[str],
         data_bytes: bytes,
         sender_address: ChecksumAddress,
@@ -403,9 +405,12 @@ class BlockchainClient:
         This protects against stale RPC gas estimates that can cause out-of-gas reverts.
         """
         try:
+            # The function is taken from the current contract on each attempt, so a retry after
+            # rotating asks the new provider rather than the one that just failed
 
 
             def gas_estimator():
+                contract_func = getattr(self.contract.functions, contract_function_name)
                 return contract_func(indexer_addresses, data_bytes).estimate_gas({"from": sender_address})
 
             estimated_gas = self._execute_rpc_call(gas_estimator)
@@ -430,7 +435,7 @@ class BlockchainClient:
         """
         # If we are not replacing a pending transaction, use the next available nonce
         if not replace:
-            nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "pending")
+            nonce = self._execute_rpc_call(lambda: self.w3.eth.get_transaction_count(sender_address, "pending"))
             logger.info(f"Using next available nonce: {nonce}")
             return nonce
 
@@ -439,7 +444,9 @@ class BlockchainClient:
 
         # Try to find pending transactions
         try:
-            pending_txs_data = self._execute_rpc_call(self.w3.eth.get_block, "pending", full_transactions=True)
+            pending_txs_data = self._execute_rpc_call(
+                lambda: self.w3.eth.get_block("pending", full_transactions=True)
+            )
             pending_txs = cast(BlockData, pending_txs_data)
             sender_pending_txs = [
                 tx
@@ -460,8 +467,12 @@ class BlockchainClient:
 
         # Check for nonce gaps
         try:
-            current_nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "pending")
-            latest_nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "latest")
+            current_nonce = self._execute_rpc_call(
+                lambda: self.w3.eth.get_transaction_count(sender_address, "pending")
+            )
+            latest_nonce = self._execute_rpc_call(
+                lambda: self.w3.eth.get_transaction_count(sender_address, "latest")
+            )
             if current_nonce > latest_nonce:
                 logger.info(f"Detected nonce gap: latest={latest_nonce}, pending={current_nonce}")
                 return latest_nonce
@@ -471,7 +482,7 @@ class BlockchainClient:
             logger.warning(f"Could not check nonce gap: {str(e)}")
 
         # Fallback to next available nonce
-        nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "pending")
+        nonce = self._execute_rpc_call(lambda: self.w3.eth.get_transaction_count(sender_address, "pending"))
         logger.info(f"Using next available nonce: {nonce}")
         return nonce
 
@@ -480,7 +491,7 @@ class BlockchainClient:
         """Get base fee and max priority fee for transaction."""
         # Get current gas prices with detailed logging
         try:
-            latest_block_data = self._execute_rpc_call(self.w3.eth.get_block, "latest")
+            latest_block_data = self._execute_rpc_call(lambda: self.w3.eth.get_block("latest"))
             latest_block = cast(BlockData, latest_block_data)
             base_fee_hex = latest_block["baseFeePerGas"]
             base_fee = int(base_fee_hex) if isinstance(base_fee_hex, int) else int(str(base_fee_hex), 16)
@@ -567,11 +578,11 @@ class BlockchainClient:
         NonceError for nonce-related failures (retryable via RPC rotation).
         """
         try:
-            tx_hash = self._execute_rpc_call(self.w3.eth.send_raw_transaction, signed_tx.raw_transaction)
+            tx_hash = self._execute_rpc_call(lambda: self.w3.eth.send_raw_transaction(signed_tx.raw_transaction))
             logger.info(f"Transaction sent with hash: 0x{tx_hash.hex()}")
 
             receipt = self._execute_rpc_call(
-                self.w3.eth.wait_for_transaction_receipt, tx_hash, self.tx_timeout_seconds
+                lambda: self.w3.eth.wait_for_transaction_receipt(tx_hash, self.tx_timeout_seconds)
             )
 
             if receipt["status"] == 1:
@@ -642,11 +653,13 @@ class BlockchainClient:
 
         # Log details
         logger.info(f"Executing transaction for function: {contract_function_name}")
-        balance = self._execute_rpc_call(self.w3.eth.get_balance, sender_address)
+        balance = self._execute_rpc_call(lambda: self.w3.eth.get_balance(sender_address))
         logger.info(f"Account balance: {self.w3.from_wei(balance, 'ether')} ETH")
 
         # 3. Estimate gas
-        gas_limit = self._estimate_transaction_gas(contract_func, indexer_addresses, data_bytes, sender_address)
+        gas_limit = self._estimate_transaction_gas(
+            contract_function_name, indexer_addresses, data_bytes, sender_address
+        )
 
         # 4. Determine nonce
         nonce = self._determine_transaction_nonce(sender_address, replace)

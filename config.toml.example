@@ -22,7 +22,7 @@ BLOCKCHAIN_CHAIN_ID = 421614
 BLOCKCHAIN_RPC_URLS = [
     "https://arbitrum-sepolia.drpc.org",
     "https://sepolia-rollup.arbitrum.io/rpc",
-    "https://api.zan.top/arb-sepolia",
+    "https://arbitrum-sepolia-rpc.publicnode.com",
     "https://arbitrum-sepolia.gateway.tenderly.co"
 ]
 BLOCK_EXPLORER_URL = "https://sepolia.arbiscan.io"

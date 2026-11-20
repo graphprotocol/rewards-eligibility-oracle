@@ -22,6 +22,7 @@ from web3.exceptions import (
     BlockNotFound,
     BlockNumberOutOfRange,
     CannotHandleRequest,
+    ContractLogicError,
     MethodUnavailable,
     MismatchedABI,
     MultipleFailedRequests,
@@ -38,6 +39,7 @@ from web3.types import BlockData, ChecksumAddress
 
 from src.utils.key_validator import KeyValidationError, validate_and_format_private_key
 from src.utils.retry_decorator import retry_with_backoff
+from src.utils.rpc_errors import CHAIN_LEVEL_ERROR_PATTERNS, NONCE_ERROR_PATTERNS, is_provider_refusal
 from src.utils.slack_notifier import SlackNotifier
 
 logger = logging.getLogger(__name__)
@@ -65,25 +67,6 @@ RPC_FAILOVER_EXCEPTIONS = (
     TransactionIndexingInProgress,
     BlockNumberOutOfRange,
     PersistentConnectionError,
-)
-
-
-# Error message patterns that indicate nonce-related issues (case-insensitive)
-NONCE_ERROR_PATTERNS = ("nonce too low", "nonce is too low", "invalid nonce")
-
-
-# Chain-level JSON-RPC error patterns where switching provider cannot help, since every provider
-# gives the same answer (case-insensitive). Nonce patterns belong here so nonce errors keep
-# propagating to the retry-with-fresh-nonce logic instead of being retried with the same nonce.
-CHAIN_LEVEL_ERROR_PATTERNS = NONCE_ERROR_PATTERNS + (
-    "execution reverted",
-    "already known",
-    "insufficient funds",
-    "transaction underpriced",
-    "intrinsic gas too low",
-    "gas required exceeds",
-    "exceeds block gas limit",
-    "max fee per gas less than block base fee",
 )
 
 
@@ -245,10 +228,12 @@ class BlockchainClient:
         return any(pattern in error_lower for pattern in NONCE_ERROR_PATTERNS)
 
 
-    def _execute_rpc_call(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
+    def _execute_rpc_call(self, func: Callable[[], Any]) -> Any:
         """
-        Execute func(*args, **kwargs) with retries and provider failover, rotating
-        through the RPC pool and raising ConnectionError once every provider has failed.
+        Call func with retries and provider failover, rotating through the RPC pool and raising
+        ConnectionError once every provider has failed. func takes no arguments and must read self.w3
+        when called, as a lambda does: a method taken from self.w3 beforehand stays tied to that
+        provider, so retries after rotating would go back to it.
         """
         providers_tried = 0
         while True:
@@ -258,7 +243,7 @@ class BlockchainClient:
 
                 @retry_with_backoff(max_attempts=3, exceptions=RPC_FAILOVER_EXCEPTIONS)
                 def do_call():
-                    return func(*args, **kwargs)
+                    return func()
 
                 return do_call()
 
@@ -271,6 +256,15 @@ class BlockchainClient:
             except Web3RPCError as e:
                 if any(pattern in str(e).lower() for pattern in CHAIN_LEVEL_ERROR_PATTERNS):
                     logger.error(f"RPC call failed with a chain-level error: {e}")
+                    raise
+
+                providers_tried = self._count_provider_failure_and_rotate(providers_tried, e)
+
+            # web3 reports a provider refusing a contract call as a revert too, so rotate for those;
+            # a real revert re-raises, since every provider would revert it the same way
+            except ContractLogicError as e:
+                if not is_provider_refusal(e):
+                    logger.error(f"Contract call reverted: {e}")
                     raise
 
                 providers_tried = self._count_provider_failure_and_rotate(providers_tried, e)
@@ -295,7 +289,9 @@ class BlockchainClient:
         # Once every provider in the pool has failed, log the error and raise an exception
         if providers_tried >= len(self.rpc_providers):
             logger.error("All RPC providers failed. Cannot proceed.")
-            raise ConnectionError("All RPC providers are unreachable.") from error
+            raise ConnectionError(
+                f"All {len(self.rpc_providers)} RPC providers failed or refused the call."
+            ) from error
 
         self._get_next_rpc_provider()
         return providers_tried
@@ -399,7 +395,7 @@ class BlockchainClient:
 
     def _estimate_transaction_gas(
         self,
-        contract_func: Any,
+        contract_function_name: str,
         indexer_addresses: List[str],
         data_bytes: bytes,
         sender_address: ChecksumAddress,
@@ -411,9 +407,12 @@ class BlockchainClient:
         This protects against stale RPC gas estimates that can cause out-of-gas reverts.
         """
         try:
+            # The function is taken from the current contract on each attempt, so a retry after
+            # rotating asks the new provider rather than the one that just failed
 
 
             def gas_estimator():
+                contract_func = getattr(self.contract.functions, contract_function_name)
                 return contract_func(indexer_addresses, data_bytes).estimate_gas({"from": sender_address})
 
             estimated_gas = self._execute_rpc_call(gas_estimator)
@@ -438,7 +437,7 @@ class BlockchainClient:
         """
         # If we are not replacing a pending transaction, use the next available nonce
         if not replace:
-            nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "pending")
+            nonce = self._execute_rpc_call(lambda: self.w3.eth.get_transaction_count(sender_address, "pending"))
             logger.info(f"Using next available nonce: {nonce}")
             return nonce
 
@@ -447,7 +446,9 @@ class BlockchainClient:
 
         # Try to find pending transactions
         try:
-            pending_txs_data = self._execute_rpc_call(self.w3.eth.get_block, "pending", full_transactions=True)
+            pending_txs_data = self._execute_rpc_call(
+                lambda: self.w3.eth.get_block("pending", full_transactions=True)
+            )
             pending_txs = cast(BlockData, pending_txs_data)
             sender_pending_txs = [
                 tx
@@ -468,8 +469,12 @@ class BlockchainClient:
 
         # Check for nonce gaps
         try:
-            current_nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "pending")
-            latest_nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "latest")
+            current_nonce = self._execute_rpc_call(
+                lambda: self.w3.eth.get_transaction_count(sender_address, "pending")
+            )
+            latest_nonce = self._execute_rpc_call(
+                lambda: self.w3.eth.get_transaction_count(sender_address, "latest")
+            )
             if current_nonce > latest_nonce:
                 logger.info(f"Detected nonce gap: latest={latest_nonce}, pending={current_nonce}")
                 return latest_nonce
@@ -479,7 +484,7 @@ class BlockchainClient:
             logger.warning(f"Could not check nonce gap: {str(e)}")
 
         # Fallback to next available nonce
-        nonce = self._execute_rpc_call(self.w3.eth.get_transaction_count, sender_address, "pending")
+        nonce = self._execute_rpc_call(lambda: self.w3.eth.get_transaction_count(sender_address, "pending"))
         logger.info(f"Using next available nonce: {nonce}")
         return nonce
 
@@ -488,7 +493,7 @@ class BlockchainClient:
         """Get base fee and max priority fee for transaction."""
         # Get current gas prices with detailed logging
         try:
-            latest_block_data = self._execute_rpc_call(self.w3.eth.get_block, "latest")
+            latest_block_data = self._execute_rpc_call(lambda: self.w3.eth.get_block("latest"))
             latest_block = cast(BlockData, latest_block_data)
             base_fee_hex = latest_block["baseFeePerGas"]
             base_fee = int(base_fee_hex) if isinstance(base_fee_hex, int) else int(str(base_fee_hex), 16)
@@ -548,15 +553,16 @@ class BlockchainClient:
 
     def _build_and_sign_transaction(
         self,
-        contract_func: Any,
+        contract_function_name: str,
         indexer_addresses: List[str],
         data_bytes: bytes,
         tx_params: Dict,
         private_key: str,
     ):
-        """Build and sign a transaction."""
+        """Build and sign a transaction, taking the function from the contract on the current provider."""
         # Try to build and sign the transaction
         try:
+            contract_func = getattr(self.contract.functions, contract_function_name)
             transaction = contract_func(indexer_addresses, data_bytes).build_transaction(tx_params)
             signed_tx = self.w3.eth.account.sign_transaction(transaction, private_key)
             logger.info("Transaction built and signed successfully")
@@ -575,11 +581,11 @@ class BlockchainClient:
         NonceError for nonce-related failures (retryable via RPC rotation).
         """
         try:
-            tx_hash = self._execute_rpc_call(self.w3.eth.send_raw_transaction, signed_tx.raw_transaction)
+            tx_hash = self._execute_rpc_call(lambda: self.w3.eth.send_raw_transaction(signed_tx.raw_transaction))
             logger.info(f"Transaction sent with hash: 0x{tx_hash.hex()}")
 
             receipt = self._execute_rpc_call(
-                self.w3.eth.wait_for_transaction_receipt, tx_hash, self.tx_timeout_seconds
+                lambda: self.w3.eth.wait_for_transaction_receipt(tx_hash, self.tx_timeout_seconds)
             )
 
             if receipt["status"] == 1:
@@ -646,15 +652,16 @@ class BlockchainClient:
             raise ValueError(
                 f"Contract function '{contract_function_name}' not found or contract not initialized."
             )
-        contract_func = getattr(self.contract.functions, contract_function_name)
 
         # Log details
         logger.info(f"Executing transaction for function: {contract_function_name}")
-        balance = self._execute_rpc_call(self.w3.eth.get_balance, sender_address)
+        balance = self._execute_rpc_call(lambda: self.w3.eth.get_balance(sender_address))
         logger.info(f"Account balance: {self.w3.from_wei(balance, 'ether')} ETH")
 
         # 3. Estimate gas
-        gas_limit = self._estimate_transaction_gas(contract_func, indexer_addresses, data_bytes, sender_address)
+        gas_limit = self._estimate_transaction_gas(
+            contract_function_name, indexer_addresses, data_bytes, sender_address
+        )
 
         # 4. Determine nonce
         nonce = self._determine_transaction_nonce(sender_address, replace)
@@ -669,7 +676,7 @@ class BlockchainClient:
 
         # 7. Build and sign transaction
         signed_tx = self._build_and_sign_transaction(
-            contract_func, indexer_addresses, data_bytes, tx_params, formatted_private_key
+            contract_function_name, indexer_addresses, data_bytes, tx_params, formatted_private_key
         )
 
         # 8. Send transaction with nonce error handling and RPC rotation. Contract reverts are not retryable,

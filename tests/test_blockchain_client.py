@@ -8,9 +8,10 @@ from unittest.mock import MagicMock, PropertyMock, mock_open, patch
 
 import pytest
 import requests
+from eth_abi import encode
 from pytest_mock import MockerFixture
 from web3 import Web3
-from web3.exceptions import TransactionNotFound, Web3RPCError
+from web3.exceptions import ContractLogicError, TransactionNotFound, Web3RPCError
 
 from src.models.blockchain_client import (
     BlockchainClient,
@@ -259,7 +260,9 @@ class TestInitializationAndConnection:
         mocker.patch.object(blockchain_client, "_get_next_rpc_provider", side_effect=rotate_skipping_primary)
 
         # Act & Assert
-        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+        with pytest.raises(
+            requests.exceptions.ConnectionError, match="All 2 RPC providers failed or refused the call"
+        ):
             blockchain_client._execute_rpc_call(mock_func)
 
         # Each of the 2 providers gets 3 retry attempts before the pool is exhausted
@@ -332,12 +335,12 @@ class TestTransactionLogic:
         With estimate=100k, 2x buffer=200k, but floor=750k wins.
         """
         # Arrange
-        mock_contract_func = MagicMock()
+        mock_contract_func = blockchain_client.contract.functions.renewIndexerEligibility
         mock_contract_func.return_value.estimate_gas.return_value = 100_000
 
         # Act
         gas_limit = blockchain_client._estimate_transaction_gas(
-            contract_func=mock_contract_func,
+            contract_function_name="renewIndexerEligibility",
             indexer_addresses=[],
             data_bytes=b"",
             sender_address=MOCK_SENDER_ADDRESS,
@@ -356,12 +359,12 @@ class TestTransactionLogic:
         With estimate=500k, 2x buffer=1M, floor=750k, ceiling=1.25M, so 1M wins.
         """
         # Arrange
-        mock_contract_func = MagicMock()
+        mock_contract_func = blockchain_client.contract.functions.renewIndexerEligibility
         mock_contract_func.return_value.estimate_gas.return_value = 500_000
 
         # Act
         gas_limit = blockchain_client._estimate_transaction_gas(
-            contract_func=mock_contract_func,
+            contract_function_name="renewIndexerEligibility",
             indexer_addresses=[],
             data_bytes=b"",
             sender_address=MOCK_SENDER_ADDRESS,
@@ -379,12 +382,12 @@ class TestTransactionLogic:
         With estimate=1M, 2x buffer=2M, ceiling=1.75M, so ceiling wins.
         """
         # Arrange
-        mock_contract_func = MagicMock()
+        mock_contract_func = blockchain_client.contract.functions.renewIndexerEligibility
         mock_contract_func.return_value.estimate_gas.return_value = 1_000_000
 
         # Act
         gas_limit = blockchain_client._estimate_transaction_gas(
-            contract_func=mock_contract_func,
+            contract_function_name="renewIndexerEligibility",
             indexer_addresses=[],
             data_bytes=b"",
             sender_address=MOCK_SENDER_ADDRESS,
@@ -399,13 +402,13 @@ class TestTransactionLogic:
         Tests that _estimate_transaction_gas raises an exception if the RPC call fails.
         """
         # Arrange
-        mock_contract_func = MagicMock()
+        mock_contract_func = blockchain_client.contract.functions.renewIndexerEligibility
         mock_contract_func.return_value.estimate_gas.side_effect = ValueError("RPC Error")
 
         # Act & Assert
         with pytest.raises(ValueError, match="RPC Error"):
             blockchain_client._estimate_transaction_gas(
-                contract_func=mock_contract_func,
+                contract_function_name="renewIndexerEligibility",
                 indexer_addresses=[],
                 data_bytes=b"",
                 sender_address=MOCK_SENDER_ADDRESS,
@@ -614,7 +617,7 @@ class TestTransactionLogic:
         Tests that _build_and_sign_transaction successfully builds and signs a transaction.
         """
         # Arrange
-        mock_contract_func = MagicMock()
+        mock_contract_func = blockchain_client.contract.functions.renewIndexerEligibility
         mock_transaction = {"data": "0x..."}
         mock_signed_transaction = MagicMock()
 
@@ -623,7 +626,7 @@ class TestTransactionLogic:
 
         # Act
         signed_tx = blockchain_client._build_and_sign_transaction(
-            contract_func=mock_contract_func,
+            contract_function_name="renewIndexerEligibility",
             indexer_addresses=[],
             data_bytes=b"",
             tx_params={"from": MOCK_SENDER_ADDRESS},
@@ -643,13 +646,13 @@ class TestTransactionLogic:
         Tests that _build_and_sign_transaction raises an exception if building fails.
         """
         # Arrange
-        mock_contract_func = MagicMock()
+        mock_contract_func = blockchain_client.contract.functions.renewIndexerEligibility
         mock_contract_func.return_value.build_transaction.side_effect = ValueError("Build error")
 
         # Act & Assert
         with pytest.raises(ValueError, match="Build error"):
             blockchain_client._build_and_sign_transaction(
-                contract_func=mock_contract_func,
+                contract_function_name="renewIndexerEligibility",
                 indexer_addresses=[],
                 data_bytes=b"",
                 tx_params={},
@@ -719,7 +722,9 @@ class TestTransactionLogic:
         )
 
         # Act & Assert - TransactionNotFound triggers RPC failover, eventually raising requests.ConnectionError
-        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+        with pytest.raises(
+            requests.exceptions.ConnectionError, match="All 2 RPC providers failed or refused the call"
+        ):
             blockchain_client._send_signed_transaction(mock_signed_tx)
 
 
@@ -802,7 +807,7 @@ class TestOrchestrationAndBatching:
             MOCK_SENDER_ADDRESS, 1, MOCK_CHAIN_ID, 21000, 100, 10, False
         )
         mock_full_transaction_flow["build_sign"].assert_called_once_with(
-            blockchain_client.contract.functions.allow,
+            contract_function_name,
             [MOCK_SENDER_ADDRESS],
             b"",
             {"tx": "params"},
@@ -1282,6 +1287,119 @@ class TestProviderRejectionRotation:
         assert blockchain_client.current_rpc_index == 0
         blockchain_client.slack_notifier.send_info_notification.assert_not_called()
 
+    # The exact JSON-RPC error ZAN's free endpoint gave every eth_call on 2026-11-20. drpc's free plan
+    # forwarded about half its calls to ZAN and passed this answer back unchanged.
+    ZAN_REFUSAL = {
+        "code": -32012,
+        "message": 'Method "eth_call" is not available for unregistered accounts. '
+        "Please visit https://zan.top/ and register to unlock more.",
+        "data": {"traceId": "1a1f866c45a0eead"},
+    }
+
+
+    @staticmethod
+    def _web3_contract_error(error: dict) -> ContractLogicError:
+        """The exception web3 raises when a provider answers a contract call with this JSON-RPC error."""
+        # web3's own private formatter, so these tests follow how web3 labels errors; imported here so a
+        # web3 upgrade that moves it fails only the tests that use it
+        from web3._utils.error_formatters_utils import raise_contract_logic_error_on_revert
+
+        with pytest.raises(ContractLogicError) as raised:
+            raise_contract_logic_error_on_revert({"jsonrpc": "2.0", "id": 1, "error": error})
+
+        return raised.value
+
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ZAN_REFUSAL,
+            # A refusal sent with null data, which web3 also raises as a revert
+            {"code": -32005, "message": "daily request limit reached", "data": None},
+        ],
+    )
+    def test_provider_refusal_reported_as_revert_rotates_to_next_provider(
+        self, blockchain_client: BlockchainClient, error: dict
+    ):
+        """
+        Tests that a provider refusing a contract call rotates to the next provider, even though web3
+        reports the refusal as a revert because the error carries an object or null as its data.
+        """
+        # Arrange
+        refusal = self._web3_contract_error(error)
+        mock_func = MagicMock(side_effect=[refusal, "Success"])
+        blockchain_client.slack_notifier.reset_mock()
+
+        # Act
+        result = blockchain_client._execute_rpc_call(mock_func)
+
+        # Assert
+        assert result == "Success"
+        assert mock_func.call_count == 2
+        assert blockchain_client.current_rpc_index == 1
+        blockchain_client.slack_notifier.send_info_notification.assert_called_once()
+
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            # What Arbitrum's own RPC answers for a call the contract rejects without a reason
+            {"code": 3, "message": "execution reverted", "data": "0x"},
+            # A revert with a reason string
+            {
+                "code": 3,
+                "message": "execution reverted: not authorized",
+                "data": "0x08c379a0" + encode(["string"], ["not authorized"]).hex(),
+            },
+            # A Solidity custom error
+            {"code": 3, "message": "execution reverted", "data": "0x12345678"},
+            # A node that reports a revert with no data at all
+            {"code": -32000, "message": "execution reverted"},
+            {"code": -32000, "message": "execution reverted", "data": None},
+            # Code 3 marks an execution error even when the message does not mention a revert
+            {"code": 3, "message": "out of gas"},
+            # Revert data sent without its 0x prefix
+            {
+                "code": 3,
+                "message": "execution reverted",
+                "data": "08c379a0" + encode(["string"], ["not authorized"]).hex(),
+            },
+            # Chain-level errors that every provider would give, with null or object data
+            {"code": -32000, "message": "insufficient funds for gas * price + value", "data": None},
+            {"code": -32000, "message": "insufficient funds for gas * price + value", "data": {"id": "1"}},
+            {"code": -32000, "message": "nonce too low", "data": None},
+            # An execution failure sent with null data, where web3 drops the code 3 that marks it
+            {"code": 3, "message": "out of gas", "data": None},
+            # A revert a proxy wraps inside object data
+            {
+                "code": -32603,
+                "message": "Internal JSON-RPC error.",
+                "data": {"data": "0x08c379a0" + encode(["string"], ["not authorized"]).hex()},
+            },
+            {
+                "code": -32603,
+                "message": "Internal JSON-RPC error.",
+                "data": {"message": "VM Exception while processing transaction: reverted with reason string"},
+            },
+        ],
+    )
+    def test_contract_and_chain_errors_do_not_rotate(self, blockchain_client: BlockchainClient, error: dict):
+        """
+        Tests that a call the contract itself reverts, or that fails for a reason every provider shares,
+        re-raises without rotation, since every provider would give the same answer.
+        """
+        # Arrange
+        mock_func = MagicMock(side_effect=self._web3_contract_error(error))
+        blockchain_client.slack_notifier.reset_mock()
+
+        # Act & Assert
+        with pytest.raises(ContractLogicError):
+            blockchain_client._execute_rpc_call(mock_func)
+
+        assert mock_func.call_count == 1
+        assert blockchain_client.current_rpc_index == 0
+        blockchain_client.slack_notifier.send_info_notification.assert_not_called()
+
 
     def test_all_providers_rejecting_raises_connection_error(self, blockchain_client: BlockchainClient):
         """
@@ -1292,7 +1410,9 @@ class TestProviderRejectionRotation:
         mock_func = MagicMock(side_effect=Web3RPCError(self.QUOTA_ERROR))
 
         # Act & Assert
-        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+        with pytest.raises(
+            requests.exceptions.ConnectionError, match="All 2 RPC providers failed or refused the call"
+        ):
             blockchain_client._execute_rpc_call(mock_func)
 
         # 1 call per provider in the 2-provider pool
@@ -1424,5 +1544,128 @@ class TestStakeReads:
         functions.getDelegationRatio.return_value.call.return_value = 16
         functions.getTokensAvailable.return_value.call.side_effect = requests.exceptions.HTTPError("429")
 
-        with pytest.raises(requests.exceptions.ConnectionError, match="All RPC providers are unreachable."):
+        with pytest.raises(
+            requests.exceptions.ConnectionError, match="All 2 RPC providers failed or refused the call"
+        ):
             blockchain_client.read_total_stake(["0xindexer"], self.STAKING_ADDRESS, self.SUBGRAPH_SERVICE_ADDRESS)
+
+
+class TestRetriesAfterRotation:
+    """Tests that a call retried after switching provider goes to the new provider, not the one that failed."""
+
+    RENEW_FUNCTION = "renewIndexerEligibility"
+
+
+    @staticmethod
+    def _provider() -> MagicMock:
+        """A connected provider with its own mocked Web3 instance."""
+        w3 = MagicMock()
+        w3.is_connected.return_value = True
+        return w3
+
+
+    @staticmethod
+    def _two_provider_client(mock_w3, mock_slack, primary: MagicMock, secondary: MagicMock) -> BlockchainClient:
+        """A client whose 2 provider URLs each get their own Web3 instance, so rotating changes which is asked."""
+        providers = dict(zip(MOCK_RPC_PROVIDERS, [primary, secondary]))
+        mock_w3.HTTPProvider.side_effect = lambda url: url
+        mock_w3.side_effect = lambda url: providers[url]
+        return BlockchainClient(
+            rpc_providers=MOCK_RPC_PROVIDERS,
+            contract_address=MOCK_CONTRACT_ADDRESS,
+            project_root=MOCK_PROJECT_ROOT,
+            block_explorer_url=MOCK_BLOCK_EXPLORER_URL,
+            tx_timeout_seconds=MOCK_TX_TIMEOUT_SECONDS,
+            slack_notifier=mock_slack,
+        )
+
+
+    def test_renewal_whose_gas_estimate_one_provider_refuses_is_sent_through_the_next(
+        self, mock_w3, mock_slack, mock_file, mocker: MockerFixture
+    ):
+        """
+        Tests that when a provider refuses to estimate gas for a renewal, the estimate and the rest of the
+        transaction go to the next provider rather than back to the one that refused.
+        """
+        # Arrange: the primary refuses eth_estimateGas the way ZAN's free plan does
+        mocker.patch(
+            "src.models.blockchain_client.BlockchainClient._setup_transaction_account",
+            return_value=(MOCK_SENDER_ADDRESS, MOCK_PRIVATE_KEY),
+        )
+        refusal = TestProviderRejectionRotation._web3_contract_error(
+            {
+                "code": -32012,
+                "message": 'Method "eth_estimateGas" is not available for unregistered accounts.',
+                "data": {"traceId": "1a1f89b759481075"},
+            }
+        )
+        primary, secondary = self._provider(), self._provider()
+        primary.eth.get_balance.return_value = 10**18
+        primary_renew = primary.eth.contract.return_value.functions.renewIndexerEligibility.return_value
+        primary_renew.estimate_gas.side_effect = refusal
+        renew = secondary.eth.contract.return_value.functions.renewIndexerEligibility.return_value
+        renew.estimate_gas.return_value = 500_000
+        secondary.eth.get_transaction_count.return_value = 3
+        secondary.eth.get_block.return_value = {"baseFeePerGas": 100 * 10**9}
+        type(secondary.eth).max_priority_fee = PropertyMock(return_value=2 * 10**9)
+        secondary.eth.account.sign_transaction.return_value = MagicMock(raw_transaction=b"signed")
+        secondary.eth.send_raw_transaction.return_value = bytes.fromhex("ab" * 32)
+        secondary.eth.wait_for_transaction_receipt.return_value = {"status": 1}
+        client = self._two_provider_client(mock_w3, mock_slack, primary, secondary)
+
+        # Act
+        tx_hash = client._execute_complete_transaction(
+            {
+                "private_key": MOCK_PRIVATE_KEY,
+                "indexer_addresses": ["0x" + "1" * 40],
+                "data_bytes": b"",
+                "contract_function": self.RENEW_FUNCTION,
+                "chain_id": MOCK_CHAIN_ID,
+                "replace": False,
+            }
+        )
+
+        # Assert
+        assert tx_hash == "ab" * 32
+        assert client.current_rpc_index == 1
+        renew.estimate_gas.assert_called_once_with({"from": MOCK_SENDER_ADDRESS})
+        secondary.eth.send_raw_transaction.assert_called_once_with(b"signed")
+        primary.eth.send_raw_transaction.assert_not_called()
+
+
+    def test_nonce_one_provider_rejects_is_read_from_the_next(self, mock_w3, mock_slack, mock_file):
+        """
+        Tests that a nonce read a provider rejects is retried on the next provider after rotating.
+        """
+        # Arrange
+        primary, secondary = self._provider(), self._provider()
+        primary.eth.get_transaction_count.side_effect = Web3RPCError(TestProviderRejectionRotation.QUOTA_ERROR)
+        secondary.eth.get_transaction_count.return_value = 7
+        client = self._two_provider_client(mock_w3, mock_slack, primary, secondary)
+
+        # Act
+        nonce = client._determine_transaction_nonce(MOCK_SENDER_ADDRESS, replace=False)
+
+        # Assert
+        assert nonce == 7
+        assert client.current_rpc_index == 1
+
+
+    def test_transaction_one_provider_rejects_is_sent_through_the_next(self, mock_w3, mock_slack, mock_file):
+        """
+        Tests that a signed transaction a provider rejects is sent, and its receipt awaited, through the
+        next provider after rotating.
+        """
+        # Arrange
+        primary, secondary = self._provider(), self._provider()
+        primary.eth.send_raw_transaction.side_effect = Web3RPCError(TestProviderRejectionRotation.QUOTA_ERROR)
+        secondary.eth.send_raw_transaction.return_value = bytes.fromhex("ab" * 32)
+        secondary.eth.wait_for_transaction_receipt.return_value = {"status": 1}
+        client = self._two_provider_client(mock_w3, mock_slack, primary, secondary)
+
+        # Act
+        tx_hash = client._send_signed_transaction(MagicMock(raw_transaction=b"signed"))
+
+        # Assert
+        assert tx_hash == "ab" * 32
+        secondary.eth.send_raw_transaction.assert_called_once_with(b"signed")

@@ -15,6 +15,8 @@ from typing import Any, List, Optional
 from web3 import Web3
 from web3.exceptions import ContractLogicError, TimeExhausted, TransactionNotFound
 
+from src.utils.rpc_errors import is_provider_refusal
+
 logger = logging.getLogger(__name__)
 
 # Applied to the estimated gas limit to absorb estimation drift between quote and inclusion
@@ -120,18 +122,24 @@ class DataEdgeClient:
             estimated = w3.eth.estimate_gas({"from": sender_address, "to": self.contract_address, "data": payload})
             return int(estimated * GAS_LIMIT_BUFFER)
 
-        # The node ran the call and it reverted, so sending it would only pay for the same revert
+        # The node ran the call and it reverted, so sending it would only pay for the same revert. web3
+        # reports a provider refusing to estimate as a revert too, and that is priced below instead.
         except ContractLogicError as e:
-            raise DataEdgeRevertedError(f"DataEdge payload reverted during gas estimation: {e}") from e
+            if not is_provider_refusal(e):
+                raise DataEdgeRevertedError(f"DataEdge payload reverted during gas estimation: {e}") from e
+
+            error: Exception = e
 
         # Some providers refuse to estimate for a fallback-only contract, so price the payload instead
         except Exception as e:
-            fallback = (
-                len(payload) * (FALLBACK_GAS_PER_CALLDATA_BYTE + FALLBACK_GAS_PER_LOG_BYTE) + FALLBACK_GAS_OVERHEAD
-            )
-            logger.warning(f"Could not estimate gas for DataEdge payload ({e}); using {fallback}")
+            error = e
 
-            return fallback
+        fallback = (
+            len(payload) * (FALLBACK_GAS_PER_CALLDATA_BYTE + FALLBACK_GAS_PER_LOG_BYTE) + FALLBACK_GAS_OVERHEAD
+        )
+        logger.warning(f"Could not estimate gas for DataEdge payload ({error}); using {fallback}")
+
+        return fallback
 
 
     def _get_gas_prices(self, w3: Web3) -> tuple[int, int]:

@@ -228,12 +228,12 @@ class BlockchainClient:
         return any(pattern in error_lower for pattern in NONCE_ERROR_PATTERNS)
 
 
-    def _execute_rpc_call(self, func: Callable, *args: Any, **kwargs: Any) -> Any:
+    def _execute_rpc_call(self, func: Callable[[], Any]) -> Any:
         """
-        Execute func(*args, **kwargs) with retries and provider failover, rotating
-        through the RPC pool and raising ConnectionError once every provider has failed.
-        func must read self.w3 when called, as a lambda does: a method taken from self.w3 beforehand
-        stays tied to that provider, so retries after rotating would go back to it.
+        Call func with retries and provider failover, rotating through the RPC pool and raising
+        ConnectionError once every provider has failed. func takes no arguments and must read self.w3
+        when called, as a lambda does: a method taken from self.w3 beforehand stays tied to that
+        provider, so retries after rotating would go back to it.
         """
         providers_tried = 0
         while True:
@@ -243,7 +243,7 @@ class BlockchainClient:
 
                 @retry_with_backoff(max_attempts=3, exceptions=RPC_FAILOVER_EXCEPTIONS)
                 def do_call():
-                    return func(*args, **kwargs)
+                    return func()
 
                 return do_call()
 
@@ -551,15 +551,16 @@ class BlockchainClient:
 
     def _build_and_sign_transaction(
         self,
-        contract_func: Any,
+        contract_function_name: str,
         indexer_addresses: List[str],
         data_bytes: bytes,
         tx_params: Dict,
         private_key: str,
     ):
-        """Build and sign a transaction."""
+        """Build and sign a transaction, taking the function from the contract on the current provider."""
         # Try to build and sign the transaction
         try:
+            contract_func = getattr(self.contract.functions, contract_function_name)
             transaction = contract_func(indexer_addresses, data_bytes).build_transaction(tx_params)
             signed_tx = self.w3.eth.account.sign_transaction(transaction, private_key)
             logger.info("Transaction built and signed successfully")
@@ -649,7 +650,6 @@ class BlockchainClient:
             raise ValueError(
                 f"Contract function '{contract_function_name}' not found or contract not initialized."
             )
-        contract_func = getattr(self.contract.functions, contract_function_name)
 
         # Log details
         logger.info(f"Executing transaction for function: {contract_function_name}")
@@ -674,7 +674,7 @@ class BlockchainClient:
 
         # 7. Build and sign transaction
         signed_tx = self._build_and_sign_transaction(
-            contract_func, indexer_addresses, data_bytes, tx_params, formatted_private_key
+            contract_function_name, indexer_addresses, data_bytes, tx_params, formatted_private_key
         )
 
         # 8. Send transaction with nonce error handling and RPC rotation. Contract reverts are not retryable,

@@ -615,7 +615,7 @@ class TestTransactionLogic:
         Tests that _build_and_sign_transaction successfully builds and signs a transaction.
         """
         # Arrange
-        mock_contract_func = MagicMock()
+        mock_contract_func = blockchain_client.contract.functions.renewIndexerEligibility
         mock_transaction = {"data": "0x..."}
         mock_signed_transaction = MagicMock()
 
@@ -624,7 +624,7 @@ class TestTransactionLogic:
 
         # Act
         signed_tx = blockchain_client._build_and_sign_transaction(
-            contract_func=mock_contract_func,
+            contract_function_name="renewIndexerEligibility",
             indexer_addresses=[],
             data_bytes=b"",
             tx_params={"from": MOCK_SENDER_ADDRESS},
@@ -644,13 +644,13 @@ class TestTransactionLogic:
         Tests that _build_and_sign_transaction raises an exception if building fails.
         """
         # Arrange
-        mock_contract_func = MagicMock()
+        mock_contract_func = blockchain_client.contract.functions.renewIndexerEligibility
         mock_contract_func.return_value.build_transaction.side_effect = ValueError("Build error")
 
         # Act & Assert
         with pytest.raises(ValueError, match="Build error"):
             blockchain_client._build_and_sign_transaction(
-                contract_func=mock_contract_func,
+                contract_function_name="renewIndexerEligibility",
                 indexer_addresses=[],
                 data_bytes=b"",
                 tx_params={},
@@ -803,7 +803,7 @@ class TestOrchestrationAndBatching:
             MOCK_SENDER_ADDRESS, 1, MOCK_CHAIN_ID, 21000, 100, 10, False
         )
         mock_full_transaction_flow["build_sign"].assert_called_once_with(
-            blockchain_client.contract.functions.allow,
+            contract_function_name,
             [MOCK_SENDER_ADDRESS],
             b"",
             {"tx": "params"},

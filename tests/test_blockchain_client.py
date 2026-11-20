@@ -11,7 +11,6 @@ import requests
 from eth_abi import encode
 from pytest_mock import MockerFixture
 from web3 import Web3
-from web3._utils.error_formatters_utils import raise_contract_logic_error_on_revert
 from web3.exceptions import ContractLogicError, TransactionNotFound, Web3RPCError
 
 from src.models.blockchain_client import (
@@ -1297,6 +1296,10 @@ class TestProviderRejectionRotation:
     @staticmethod
     def _web3_contract_error(error: dict) -> ContractLogicError:
         """The exception web3 raises when a provider answers a contract call with this JSON-RPC error."""
+        # web3's own private formatter, so these tests follow how web3 labels errors; imported here so a
+        # web3 upgrade that moves it fails only the tests that use it
+        from web3._utils.error_formatters_utils import raise_contract_logic_error_on_revert
+
         with pytest.raises(ContractLogicError) as raised:
             raise_contract_logic_error_on_revert({"jsonrpc": "2.0", "id": 1, "error": error})
 

@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from web3._utils.error_formatters_utils import raise_contract_logic_error_on_revert
 from web3.exceptions import ContractLogicError, RequestTimedOut, TimeExhausted, TransactionNotFound, Web3RPCError
 
 from src.models.data_edge_client import (
@@ -508,6 +507,9 @@ class TestPostPayload:
             "Please visit https://zan.top/ and register to unlock more.",
             "data": {"traceId": "1a1f89b759481075"},
         }
+        # web3's own private formatter, imported here so a web3 upgrade that moves it fails only this test
+        from web3._utils.error_formatters_utils import raise_contract_logic_error_on_revert
+
         with pytest.raises(ContractLogicError) as raised:
             raise_contract_logic_error_on_revert({"jsonrpc": "2.0", "id": 1, "error": refusal})
         w3 = _build_web3()

@@ -15,7 +15,7 @@ from typing import Any, List, Optional
 from web3 import Web3
 from web3.exceptions import ContractLogicError, TimeExhausted, TransactionNotFound
 
-from src.models.blockchain_client import is_provider_refusal
+from src.utils.rpc_errors import is_provider_refusal
 
 logger = logging.getLogger(__name__)
 

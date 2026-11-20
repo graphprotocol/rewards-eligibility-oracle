@@ -39,6 +39,7 @@ from web3.types import BlockData, ChecksumAddress
 
 from src.utils.key_validator import KeyValidationError, validate_and_format_private_key
 from src.utils.retry_decorator import retry_with_backoff
+from src.utils.rpc_errors import CHAIN_LEVEL_ERROR_PATTERNS, NONCE_ERROR_PATTERNS, is_provider_refusal
 from src.utils.slack_notifier import SlackNotifier
 
 logger = logging.getLogger(__name__)
@@ -67,42 +68,6 @@ RPC_FAILOVER_EXCEPTIONS = (
     BlockNumberOutOfRange,
     PersistentConnectionError,
 )
-
-
-# Error message patterns that indicate nonce-related issues (case-insensitive)
-NONCE_ERROR_PATTERNS = ("nonce too low", "nonce is too low", "invalid nonce")
-
-
-# Chain-level JSON-RPC error patterns where switching provider cannot help, since every provider
-# gives the same answer (case-insensitive). Nonce patterns belong here so nonce errors keep
-# propagating to the retry-with-fresh-nonce logic instead of being retried with the same nonce.
-CHAIN_LEVEL_ERROR_PATTERNS = NONCE_ERROR_PATTERNS + (
-    "execution reverted",
-    "already known",
-    "insufficient funds",
-    "transaction underpriced",
-    "intrinsic gas too low",
-    "gas required exceeds",
-    "exceeds block gas limit",
-    "max fee per gas less than block base fee",
-)
-
-
-def is_provider_refusal(error: ContractLogicError) -> bool:
-    """
-    Tell a provider refusing a contract call, such as a free plan not allowing it, apart from a real revert.
-
-    web3 raises ContractLogicError for both. A real revert carries hex revert data or says it reverted; when
-    the data is an object, web3 puts "execution reverted: " before the provider's own message, so it is dropped.
-    """
-    if isinstance(error.data, str) and error.data.startswith("0x"):
-        return False
-
-    message = error.message or ""
-    if isinstance(error.data, dict):
-        message = message.removeprefix("execution reverted: ")
-
-    return "revert" not in message.lower()
 
 
 # The only 2 view functions read to size each indexer's stake, so no ABI file is needed for them

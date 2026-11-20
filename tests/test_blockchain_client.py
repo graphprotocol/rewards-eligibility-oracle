@@ -8,9 +8,11 @@ from unittest.mock import MagicMock, PropertyMock, mock_open, patch
 
 import pytest
 import requests
+from eth_abi import encode
 from pytest_mock import MockerFixture
 from web3 import Web3
-from web3.exceptions import TransactionNotFound, Web3RPCError
+from web3._utils.error_formatters_utils import raise_contract_logic_error_on_revert
+from web3.exceptions import ContractLogicError, TransactionNotFound, Web3RPCError
 
 from src.models.blockchain_client import (
     BlockchainClient,
@@ -1278,6 +1280,82 @@ class TestProviderRejectionRotation:
             blockchain_client._execute_rpc_call(mock_func)
 
         # No rotation should occur for chain-level errors
+        assert mock_func.call_count == 1
+        assert blockchain_client.current_rpc_index == 0
+        blockchain_client.slack_notifier.send_info_notification.assert_not_called()
+
+    # The exact JSON-RPC error ZAN's free endpoint gave every eth_call on 2026-11-20. drpc's free plan
+    # forwarded about half its calls to ZAN and passed this answer back unchanged.
+    ZAN_REFUSAL = {
+        "code": -32012,
+        "message": 'Method "eth_call" is not available for unregistered accounts. '
+        "Please visit https://zan.top/ and register to unlock more.",
+        "data": {"traceId": "1a1f866c45a0eead"},
+    }
+
+
+    @staticmethod
+    def _web3_contract_error(error: dict) -> ContractLogicError:
+        """The exception web3 raises when a provider answers a contract call with this JSON-RPC error."""
+        with pytest.raises(ContractLogicError) as raised:
+            raise_contract_logic_error_on_revert({"jsonrpc": "2.0", "id": 1, "error": error})
+
+        return raised.value
+
+
+    def test_provider_refusal_reported_as_revert_rotates_to_next_provider(
+        self, blockchain_client: BlockchainClient
+    ):
+        """
+        Tests that a provider refusing a contract call rotates to the next provider, even though web3
+        reports the refusal as a revert because the error carries an object as its data.
+        """
+        # Arrange
+        refusal = self._web3_contract_error(self.ZAN_REFUSAL)
+        mock_func = MagicMock(side_effect=[refusal, "Success"])
+        blockchain_client.slack_notifier.reset_mock()
+
+        # Act
+        result = blockchain_client._execute_rpc_call(mock_func)
+
+        # Assert
+        assert result == "Success"
+        assert mock_func.call_count == 2
+        assert blockchain_client.current_rpc_index == 1
+        blockchain_client.slack_notifier.send_info_notification.assert_called_once()
+
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            # What Arbitrum's own RPC answers for a call the contract rejects without a reason
+            {"code": 3, "message": "execution reverted", "data": "0x"},
+            # A revert with a reason string
+            {
+                "code": 3,
+                "message": "execution reverted: not authorized",
+                "data": "0x08c379a0" + encode(["string"], ["not authorized"]).hex(),
+            },
+            # A Solidity custom error
+            {"code": 3, "message": "execution reverted", "data": "0x12345678"},
+            # A node that reports a revert with no data at all
+            {"code": -32000, "message": "execution reverted"},
+            {"code": -32000, "message": "execution reverted", "data": None},
+        ],
+    )
+    def test_contract_reverts_do_not_rotate(self, blockchain_client: BlockchainClient, error: dict):
+        """
+        Tests that a call the contract itself reverts re-raises without rotation, since every
+        provider would revert it the same way.
+        """
+        # Arrange
+        mock_func = MagicMock(side_effect=self._web3_contract_error(error))
+        blockchain_client.slack_notifier.reset_mock()
+
+        # Act & Assert
+        with pytest.raises(ContractLogicError):
+            blockchain_client._execute_rpc_call(mock_func)
+
         assert mock_func.call_count == 1
         assert blockchain_client.current_rpc_index == 0
         blockchain_client.slack_notifier.send_info_notification.assert_not_called()

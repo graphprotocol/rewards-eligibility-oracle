@@ -22,6 +22,7 @@ from web3.exceptions import (
     BlockNotFound,
     BlockNumberOutOfRange,
     CannotHandleRequest,
+    ContractLogicError,
     MethodUnavailable,
     MismatchedABI,
     MultipleFailedRequests,
@@ -85,6 +86,23 @@ CHAIN_LEVEL_ERROR_PATTERNS = NONCE_ERROR_PATTERNS + (
     "exceeds block gas limit",
     "max fee per gas less than block base fee",
 )
+
+
+def is_provider_refusal(error: ContractLogicError) -> bool:
+    """
+    Tell a provider refusing a contract call, such as a free plan not allowing it, apart from a real revert.
+
+    web3 raises ContractLogicError for both. A real revert carries hex revert data or says it reverted; when
+    the data is an object, web3 puts "execution reverted: " before the provider's own message, so it is dropped.
+    """
+    if isinstance(error.data, str) and error.data.startswith("0x"):
+        return False
+
+    message = error.message or ""
+    if isinstance(error.data, dict):
+        message = message.removeprefix("execution reverted: ")
+
+    return "revert" not in message.lower()
 
 
 # The only 2 view functions read to size each indexer's stake, so no ABI file is needed for them
@@ -271,6 +289,15 @@ class BlockchainClient:
             except Web3RPCError as e:
                 if any(pattern in str(e).lower() for pattern in CHAIN_LEVEL_ERROR_PATTERNS):
                     logger.error(f"RPC call failed with a chain-level error: {e}")
+                    raise
+
+                providers_tried = self._count_provider_failure_and_rotate(providers_tried, e)
+
+            # web3 reports a provider refusing a contract call as a revert too, so rotate for those;
+            # a real revert re-raises, since every provider would revert it the same way
+            except ContractLogicError as e:
+                if not is_provider_refusal(e):
+                    logger.error(f"Contract call reverted: {e}")
                     raise
 
                 providers_tried = self._count_provider_failure_and_rotate(providers_tried, e)

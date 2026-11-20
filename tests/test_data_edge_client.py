@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from web3._utils.error_formatters_utils import raise_contract_logic_error_on_revert
 from web3.exceptions import ContractLogicError, RequestTimedOut, TimeExhausted, TransactionNotFound, Web3RPCError
 
 from src.models.data_edge_client import (
@@ -491,6 +492,35 @@ class TestPostPayload:
 
         w3.eth.send_raw_transaction.assert_not_called()
         mock_web3.HTTPProvider.assert_called_once_with(PRIMARY_RPC)
+
+
+    def test_post_payload_prices_gas_when_a_provider_refuses_to_estimate_it(
+        self, client: DataEdgeClient, mock_web3: MagicMock
+    ):
+        """
+        Tests that a provider refusing to estimate gas does not stop the publish, even though web3 reports
+        the refusal as a revert because the error carries an object as its data.
+        """
+        # Arrange: the exact answer ZAN's free endpoint gave to eth_estimateGas on 2026-11-20
+        refusal = {
+            "code": -32012,
+            "message": 'Method "eth_estimateGas" is not available for unregistered accounts. '
+            "Please visit https://zan.top/ and register to unlock more.",
+            "data": {"traceId": "1a1f89b759481075"},
+        }
+        with pytest.raises(ContractLogicError) as raised:
+            raise_contract_logic_error_on_revert({"jsonrpc": "2.0", "id": 1, "error": refusal})
+        w3 = _build_web3()
+        w3.eth.estimate_gas.side_effect = raised.value
+        mock_web3.return_value = w3
+
+        # Act
+        client.post_payload(PAYLOAD, PRIVATE_KEY)
+
+        # Assert: the payload went out with gas priced from its length
+        transaction = w3.eth.account.sign_transaction.call_args.args[0]
+        assert transaction["gas"] == FALLBACK_GAS_OVERHEAD + len(PAYLOAD) * 24
+        w3.eth.send_raw_transaction.assert_called_once()
 
 
     def test_post_payload_applies_a_buffer_to_the_estimated_gas(

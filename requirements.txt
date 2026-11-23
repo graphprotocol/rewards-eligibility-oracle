@@ -16,7 +16,7 @@ bigframes==2.53.0
 # Data processing and validation
 pandas==3.1.1
 pandera==0.36.0
-numpy==2.5.4
+numpy==2.5.5
 
 # Blockchain integration - Latest compatible versions
 web3==8.0.0
@@ -40,4 +40,4 @@ types-pytz==2026.6.0.20261031
 types-requests==2.33.0.20261030
 
 # Linting and formatting
-ruff==0.17.5
+ruff==0.17.6
